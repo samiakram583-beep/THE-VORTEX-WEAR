@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
+export default app;
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
