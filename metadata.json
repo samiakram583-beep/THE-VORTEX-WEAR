@@ -1,0 +1,6 @@
+{
+  "name": "The Vortex Wear - Modern Clothing & Menswear",
+  "description": "The Vortex Wear is a premium modern clothing brand specializing in luxury structured shirts and tailored pants in Pakistan. Define your style.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
