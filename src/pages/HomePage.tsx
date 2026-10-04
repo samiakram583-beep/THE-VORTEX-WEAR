@@ -1,5 +1,12 @@
 import React from 'react';
-import { ArrowRight, ShoppingBag, ShieldCheck, Sparkles, MessageCircle, Star } from 'lucide-react';
+import {
+  ArrowRight,
+  ShoppingBag,
+  ShieldCheck,
+  Sparkles,
+  MessageCircle,
+  Star,
+} from 'lucide-react';
 import { useStore } from '../lib/store';
 import { ProductCard } from '../components/ProductCard';
 import { Product } from '../lib/types';
@@ -53,10 +60,9 @@ export const HomePage: React.FC<HomePageProps> = ({
     <div className="space-y-12 sm:space-y-20 pb-20">
       {/* 1. Large Fashion Hero Section */}
       <section className="relative min-h-[500px] sm:min-h-[620px] lg:min-h-[700px] flex items-center bg-[#121212] text-white overflow-hidden">
-        {/* Background Image */}
         <div className="absolute inset-0 z-0 overflow-hidden">
           <img
-            src={heroBanner.image_url}
+            src={heroBanner.image_url || heroImage}
             alt={
               heroBanner.title ||
               'The Vortex Wear Modern Menswear Campaign'
@@ -66,18 +72,17 @@ export const HomePage: React.FC<HomePageProps> = ({
             // @ts-ignore
             fetchPriority="high"
             onError={(e) => {
-              // Graceful fallback to the bundled brand hero asset
-              e.currentTarget.src = heroImage;
+              if (e.currentTarget.src !== heroImage) {
+                e.currentTarget.src = heroImage;
+              }
             }}
             className="w-full h-full object-cover object-center sm:object-center opacity-75 scale-102 animate-hero-zoom transition-transform duration-1000"
           />
 
-          {/* Text readability scrims */}
           <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-[#121212]/50 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#121212]/95 via-[#121212]/60 sm:via-[#121212]/30 to-transparent" />
         </div>
 
-        {/* Content Container */}
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24 w-full">
           <div className="max-w-xl space-y-4 sm:space-y-6 animate-slide-up">
             <div className="inline-flex items-center gap-2 text-[11px] sm:text-xs uppercase tracking-widest text-stone-300 font-semibold bg-white/10 backdrop-blur-xs px-3 py-1 rounded-full border border-white/10 w-fit">
@@ -153,7 +158,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Category: Shirts */}
+          {/* Shirts */}
           <div
             onClick={() => onNavigate('/shirts')}
             className="group cursor-pointer relative h-96 sm:h-[420px] rounded-xl overflow-hidden bg-stone-900 shadow-md border border-stone-200/80"
@@ -178,8 +183,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 </h3>
 
                 <p className="text-xs text-stone-300 mt-1 max-w-sm">
-                  Heavyweight Japanese twill overshirts, crisp Egyptian
-                  oxford cotton, and breathable resort linens.
+                  Heavyweight Japanese twill overshirts, crisp Egyptian oxford cotton, and breathable resort linens.
                 </p>
               </div>
 
@@ -189,7 +193,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
           </div>
 
-          {/* Category: Pants */}
+          {/* Pants */}
           <div
             onClick={() => onNavigate('/pants')}
             className="group cursor-pointer relative h-96 sm:h-[420px] rounded-xl overflow-hidden bg-stone-900 shadow-md border border-stone-200/80"
@@ -214,8 +218,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 </h3>
 
                 <p className="text-xs text-stone-300 mt-1 max-w-sm">
-                  Tactical ripstop cargos, pleated wool-blend trousers,
-                  and everyday comfort stretch chinos.
+                  Tactical ripstop cargos, pleated wool-blend trousers, and everyday comfort stretch chinos.
                 </p>
               </div>
 
@@ -227,7 +230,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* 3. New Arrivals Grid */}
+      {/* 3. New Arrivals */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-end justify-between mb-8">
           <div>
@@ -261,7 +264,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* 4. Seasonal Sale / Feature Showcase */}
+      {/* 4. Seasonal Sale */}
       {saleProducts.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="bg-stone-900 text-white rounded-2xl p-6 sm:p-10 mb-8 border border-stone-800">
@@ -276,12 +279,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                 </h2>
 
                 <p className="text-xs sm:text-sm text-stone-300 mt-2 max-w-xl">
-                  Save up to 25% on select essential shirts and tactical
-                  cargos. Use code{' '}
-                  <strong className="text-white underline">
-                    WELCOME10
-                  </strong>{' '}
-                  at checkout for extra savings.
+                  Save up to 25% on select essential shirts and tactical cargos. Use code{' '}
+                  <strong className="text-white underline">WELCOME10</strong> at checkout for extra savings.
                 </p>
               </div>
 
@@ -341,7 +340,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* 6. Why The Vortex Wear? */}
+      {/* 6. Why The Vortex Wear */}
       <section className="bg-white border-y border-stone-200/80 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-2xl mx-auto mb-12">
@@ -354,9 +353,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </h2>
 
             <p className="text-xs sm:text-sm text-stone-600 mt-2">
-              Every garment is engineered from scratch, rejecting synthetic
-              fast-fashion in favor of substantial yarns and architectural
-              tailoring.
+              Every garment is engineered from scratch, rejecting synthetic fast-fashion in favor of substantial yarns and architectural tailoring.
             </p>
           </div>
 
@@ -371,9 +368,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </h3>
 
               <p className="text-xs text-stone-600 leading-relaxed">
-                We utilize heavy 320 GSM cotton twills, genuine French flax
-                linens, and durable ripstop weaves designed to hold clean
-                lines over years of wear.
+                We utilize heavy 320 GSM cotton twills, genuine French flax linens, and durable ripstop weaves designed to hold clean lines over years of wear.
               </p>
             </div>
 
@@ -387,9 +382,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </h3>
 
               <p className="text-xs text-stone-600 leading-relaxed">
-                Breathable weaves optimized for our climate, paired with
-                frictionless nationwide Cash on Delivery and prompt customer
-                service.
+                Breathable weaves optimized for our climate, paired with frictionless nationwide Cash on Delivery and prompt customer service.
               </p>
             </div>
 
@@ -403,9 +396,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </h3>
 
               <p className="text-xs text-stone-600 leading-relaxed">
-                Cohesive color stories across shirts and pants ensure that
-                any piece from our collection pairs harmoniously with any
-                other.
+                Cohesive color stories across shirts and pants ensure that any piece from our collection pairs harmoniously with any other.
               </p>
             </div>
           </div>
@@ -461,7 +452,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </section>
       )}
 
-      {/* 8. WhatsApp Direct Concierge Section */}
+      {/* 8. WhatsApp Concierge */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-[#0c1a12] text-white rounded-2xl p-8 sm:p-12 border border-emerald-900/40 relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="max-w-xl space-y-3 text-center md:text-left">
@@ -475,8 +466,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </h3>
 
             <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">
-              Reach our store founder and stylist Bilal Akram directly on
-              WhatsApp at{' '}
+              Reach our store founder and stylist Bilal Akram directly on WhatsApp at{' '}
               <strong className="text-white">
                 {settings.whatsapp_number}
               </strong>
