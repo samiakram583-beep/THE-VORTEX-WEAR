@@ -853,7 +853,17 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('[ERROR] Failed to start server:', err);
-  process.exit(1);
-});
+// ==============================================================================
+// 8. VERCEL / LOCAL SERVER STARTUP
+// ==============================================================================
+
+// Vercel imports the Express app directly.
+// Local development / traditional Node hosting starts the listener.
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('[ERROR] Failed to start server:', err);
+    process.exit(1);
+  });
+}
+
+export { app };
