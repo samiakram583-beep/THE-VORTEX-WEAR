@@ -35,6 +35,7 @@ import { useStore } from '../../lib/store';
 import { Product, ProductVariant, OrderStatus, Category, Coupon, AdminAuditLog } from '../../lib/types';
 import { uploadImageFile, isSupabaseConfigured } from '../../lib/supabase';
 import { AdminAuthService } from '../../lib/adminAuth';
+import { productBlackShirtVortex } from '../../assets/images';
 
 export type AdminTab =
   | 'overview'
@@ -222,7 +223,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [prodFormIsNew, setProdFormIsNew] = useState(true);
   const [prodFormIsSale, setProdFormIsSale] = useState(false);
   const [prodFormImages, setProdFormImages] = useState<string[]>([
-    '/src/assets/images/product_black_shirt_vortex_1790956397815.jpg',
+    productBlackShirtVortex,
   ]);
   const [prodVariants, setProdVariants] = useState<ProductVariant[]>([
     { id: 'v1', product_id: '', color: 'Onyx Black', size: 'M', sku: 'VOR-NEW-M', price: 4500, stock_quantity: 20, is_active: true },
@@ -235,16 +236,184 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Search in Products
   const [productSearch, setProductSearch] = useState('');
 
-  // Analytics Metrics
-  const totalSales = orders.reduce((sum, o) => sum + (o.order_status !== 'cancelled' ? o.total : 0), 0);
+  // Hero Banner Management State
+  const [selectedBannerFile, setSelectedBannerFile] = useState<File | null>(null);
+  const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
+  const [bannerSuccessMessage, setBannerSuccessMessage] = useState<string | null>(null);
+  const [bannerErrorMessage, setBannerErrorMessage] = useState<string | null>(null);
+
+  const handleBannerFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBannerErrorMessage(null);
+    setBannerSuccessMessage(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setBannerErrorMessage('Please select a valid image file (JPG, PNG, WEBP).');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setBannerErrorMessage('Image size exceeds 10MB limit. Please upload a compressed image.');
+      return;
+    }
+
+    setSelectedBannerFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setBannerPreviewUrl(objectUrl);
+  };
+
+  const handleCancelBannerUpload = () => {
+    if (bannerPreviewUrl && bannerPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(bannerPreviewUrl);
+    }
+    setSelectedBannerFile(null);
+    setBannerPreviewUrl(null);
+    setBannerErrorMessage(null);
+    setBannerSuccessMessage('Upload cancelled. Current hero banner remains unchanged.');
+  };
+
+  const handleSaveHeroBanner = async () => {
+    if (!selectedBannerFile && !bannerPreviewUrl) {
+      setBannerErrorMessage('Please select an image file to upload first.');
+      return;
+    }
+
+    const activeBanner = banners.find((b) => b.is_active) || banners[0];
+    if (!activeBanner) {
+      setBannerErrorMessage('No active banner found to update.');
+      return;
+    }
+
+    setIsUploadingBanner(true);
+    setBannerErrorMessage(null);
+    setBannerSuccessMessage(null);
+
+    try {
+      let finalImageUrl = bannerPreviewUrl || '';
+      if (selectedBannerFile) {
+        finalImageUrl = await uploadImageFile(selectedBannerFile, 'banners');
+      }
+
+      await updateBanner(activeBanner.id, {
+        image_url: finalImageUrl,
+      });
+
+      if (bannerPreviewUrl && bannerPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(bannerPreviewUrl);
+      }
+      setSelectedBannerFile(null);
+      setBannerPreviewUrl(null);
+      setBannerSuccessMessage('Hero banner image updated and published successfully! Homepage hero will now display this banner.');
+      showToast('Hero banner updated and published successfully!', 'success');
+    } catch (err: any) {
+      setBannerErrorMessage(err?.message || 'Failed to update hero banner.');
+      showToast('Failed to update hero banner', 'error');
+    } finally {
+      setIsUploadingBanner(false);
+    }
+  };
+
+  // Real Business Analytics Metrics (100% computed from actual application & Supabase data)
+  const activeOrders = orders.filter((o) => o.order_status !== 'cancelled');
+  const totalSales = activeOrders.reduce((sum, o) => sum + o.total, 0);
+  const totalOrdersCount = orders.length;
   const pendingOrdersCount = orders.filter((o) => o.order_status === 'pending').length;
-  const totalProductsSold = orders.reduce(
+  const processingOrdersCount = orders.filter((o) => o.order_status === 'processing').length;
+  const shippedOrdersCount = orders.filter((o) => o.order_status === 'shipped').length;
+  const deliveredOrdersCount = orders.filter((o) => o.order_status === 'delivered').length;
+  const cancelledOrdersCount = orders.filter((o) => o.order_status === 'cancelled').length;
+
+  const uniqueCustomerEmails = Array.from(new Set(orders.map((o) => o.customer_email.trim().toLowerCase())));
+  const totalCustomersCount = uniqueCustomerEmails.length;
+
+  const totalProductsSold = activeOrders.reduce(
     (sum, o) => sum + o.items.reduce((acc, i) => acc + i.quantity, 0),
     0
   );
-  const lowStockVariants = products.flatMap((p) =>
-    p.variants.filter((v) => v.stock_quantity <= 5).map((v) => ({ ...v, productName: p.name }))
+
+  const averageOrderValue = activeOrders.length > 0 ? Math.round(totalSales / activeOrders.length) : 0;
+
+  const totalStockUnits = products.reduce(
+    (sum, p) => sum + p.variants.reduce((acc, v) => acc + (v.stock_quantity || 0), 0),
+    0
   );
+  const totalStockValue = products.reduce(
+    (sum, p) => sum + p.variants.reduce((acc, v) => acc + ((v.stock_quantity || 0) * (v.price || p.base_price)), 0),
+    0
+  );
+  const lowStockVariants = products.flatMap((p) =>
+    p.variants.filter((v) => v.stock_quantity <= 5).map((v) => ({ ...v, productName: p.name, productSlug: p.slug }))
+  );
+
+  // Best-selling products (from real orders)
+  const productSalesMap = new Map<string, { id: string; name: string; slug: string; unitsSold: number; revenue: number; currentStock: number }>();
+  products.forEach((p) => {
+    const stock = p.variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
+    productSalesMap.set(p.id, {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      unitsSold: 0,
+      revenue: 0,
+      currentStock: stock,
+    });
+  });
+  activeOrders.forEach((o) => {
+    o.items.forEach((item) => {
+      const existing = productSalesMap.get(item.product_id);
+      if (existing) {
+        existing.unitsSold += item.quantity;
+        existing.revenue += item.total_price || item.unit_price * item.quantity;
+      }
+    });
+  });
+  const productSalesList = Array.from(productSalesMap.values()).sort((a, b) => b.unitsSold - a.unitsSold || b.revenue - a.revenue);
+
+  // Category performance (from real products and orders)
+  const categoryPerformance = categories.map((cat) => {
+    const catProducts = products.filter((p) => p.category_id === cat.id);
+    const catProductIds = new Set(catProducts.map((p) => p.id));
+    const catStock = catProducts.reduce(
+      (sum, p) => sum + p.variants.reduce((acc, v) => acc + (v.stock_quantity || 0), 0),
+      0
+    );
+    let unitsSold = 0;
+    let revenue = 0;
+    activeOrders.forEach((o) => {
+      o.items.forEach((item) => {
+        if (catProductIds.has(item.product_id)) {
+          unitsSold += item.quantity;
+          revenue += item.total_price || item.unit_price * item.quantity;
+        }
+      });
+    });
+    return {
+      id: cat.id,
+      name: cat.name,
+      productCount: catProducts.length,
+      unitsSold,
+      revenue,
+      stock: catStock,
+      shareOfRevenue: totalSales > 0 ? Math.round((revenue / totalSales) * 100) : 0,
+    };
+  });
+
+  // Real regional destinations from actual orders
+  const cityCountMap = new Map<string, number>();
+  orders.forEach((o) => {
+    const city = (o.city || 'Unspecified').trim();
+    if (city) {
+      cityCountMap.set(city, (cityCountMap.get(city) || 0) + 1);
+    }
+  });
+  const topCities = Array.from(cityCountMap.entries())
+    .map(([city, count]) => ({
+      city,
+      count,
+      percentage: orders.length > 0 ? Math.round((count / orders.length) * 100) : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
 
   const openNewProductModal = () => {
     setEditingProduct(null);
@@ -259,7 +428,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProdFormIsFeatured(false);
     setProdFormIsNew(true);
     setProdFormIsSale(false);
-    setProdFormImages(['/src/assets/images/product_black_shirt_vortex_1790956397815.jpg']);
+    setProdFormImages([productBlackShirtVortex]);
     setProdVariants([
       { id: 'v1', product_id: '', color: 'Onyx Black', size: 'M', sku: `SKU-${Date.now()}-M`, price: 4500, stock_quantity: 15, is_active: true },
       { id: 'v2', product_id: '', color: 'Onyx Black', size: 'L', sku: `SKU-${Date.now()}-L`, price: 4500, stock_quantity: 10, is_active: true },
@@ -1160,25 +1329,235 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
-          {/* TAB 8: BANNERS */}
+          {/* TAB 8: BANNERS / HERO BANNER */}
           {activeTab === 'banners' && (
-            <div className="space-y-6">
+            <div className="space-y-6 max-w-4xl">
               <div>
-                <h1 className="text-2xl font-bold font-display text-stone-950">Homepage Hero Banners</h1>
-                <p className="text-xs text-stone-500 mt-1">Configure campaigns and high-impact visual banners.</p>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold font-display text-stone-950">Homepage Hero Banner</h1>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Live System
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500 mt-1">
+                  Manage the primary visual campaign image shown to all visitors on the homepage. The active banner remains unchanged unless an administrator explicitly uploads and publishes a replacement.
+                </p>
               </div>
 
-              {banners.map((b) => (
-                <div key={b.id} className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4 max-w-2xl">
-                  <div className="aspect-[16/9] rounded-lg overflow-hidden bg-stone-900">
-                    <img src={b.image_url} alt="" className="w-full h-full object-cover" />
+              {/* Status / Alert Messages */}
+              {bannerSuccessMessage && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{bannerSuccessMessage}</span>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-stone-950 font-display">{b.title}</h3>
-                    <p className="text-xs text-stone-600 mt-1">{b.description}</p>
-                  </div>
+                  <button
+                    onClick={() => setBannerSuccessMessage(null)}
+                    className="text-emerald-700 hover:text-emerald-950 font-bold text-xs"
+                  >
+                    Dismiss
+                  </button>
                 </div>
-              ))}
+              )}
+
+              {bannerErrorMessage && (
+                <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{bannerErrorMessage}</span>
+                  </div>
+                  <button
+                    onClick={() => setBannerErrorMessage(null)}
+                    className="text-rose-700 hover:text-rose-950 font-bold text-xs"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Current Active Banner Card */}
+              {(() => {
+                const activeBanner = banners.find((b) => b.is_active) || banners[0] || {
+                  id: 'default-hero',
+                  title: 'Define Your Style.',
+                  description: 'Modern clothing designed for your everyday style. High-density fabrics, structured tailoring, and contemporary silhouettes.',
+                  image_url: '',
+                  button_text: 'Explore Collection',
+                  button_url: '/shop',
+                  is_active: true,
+                  sort_order: 1,
+                };
+
+                return (
+                  <div className="space-y-6">
+                    <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-stone-100">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <h3 className="text-sm font-bold text-stone-900 font-display">
+                              Current Active Hero Banner
+                            </h3>
+                          </div>
+                          <p className="text-[11px] text-stone-400 mt-0.5">
+                            This high-resolution picture is currently active and rendered on the storefront homepage.
+                          </p>
+                        </div>
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md w-fit">
+                          Active & Visible
+                        </span>
+                      </div>
+
+                      {/* Current Picture Preview */}
+                      <div className="relative aspect-[16/9] sm:aspect-[21/9] rounded-xl overflow-hidden bg-stone-950 border border-stone-800 shadow-inner">
+                        <img
+                          src={activeBanner.image_url}
+                          alt={activeBanner.title || 'Current Homepage Hero Banner'}
+                          className="w-full h-full object-cover object-center"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex items-end p-4 sm:p-6">
+                          <div className="text-white space-y-1 max-w-lg">
+                            <span className="text-[10px] uppercase tracking-widest text-amber-300 font-semibold block">
+                              Active Campaign Headline
+                            </span>
+                            <h4 className="text-base sm:text-xl font-bold font-display">
+                              {activeBanner.title || 'Define Your Style.'}
+                            </h4>
+                            <p className="text-xs text-stone-300 line-clamp-2">
+                              {activeBanner.description || 'Modern clothing designed for your everyday style.'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-stone-500 border-t border-stone-100">
+                        <span className="truncate max-w-md font-mono text-[11px]">
+                          Source: {activeBanner.image_url.startsWith('data:') ? 'Base64 image asset' : activeBanner.image_url}
+                        </span>
+                        <span className="text-stone-400 text-[11px]">Aspect Ratio: 21:9 / 16:9 cinematic</span>
+                      </div>
+                    </div>
+
+                    {/* Upload / Replace Hero Picture Action Card */}
+                    <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-5">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-bold text-stone-900 font-display">
+                          Upload New Picture to Replace Hero Banner
+                        </h3>
+                        <p className="text-xs text-stone-500">
+                          Select an image from your computer, phone, or tablet. You can preview the picture before saving and publishing.
+                        </p>
+                      </div>
+
+                      {/* File Selection Dropzone */}
+                      {!bannerPreviewUrl ? (
+                        <div className="border-2 border-dashed border-stone-300 hover:border-stone-500 rounded-xl p-6 sm:p-8 text-center transition-colors bg-stone-50/50">
+                          <input
+                            type="file"
+                            id="hero-banner-file-input"
+                            accept="image/png,image/jpeg,image/webp,image/jpg"
+                            onChange={handleBannerFileSelect}
+                            className="hidden"
+                          />
+                          <label
+                            htmlFor="hero-banner-file-input"
+                            className="cursor-pointer flex flex-col items-center justify-center space-y-3"
+                          >
+                            <div className="w-12 h-12 rounded-full bg-stone-900 text-white flex items-center justify-center shadow-sm">
+                              <Upload className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <span className="text-xs font-bold text-stone-900 hover:underline">
+                                Click to choose image
+                              </span>
+                              <span className="text-xs text-stone-500"> or browse from your device</span>
+                              <p className="text-[11px] text-stone-400 mt-1">
+                                Supported formats: JPG, PNG, WEBP (recommended 1920×1080 or larger, up to 10MB)
+                              </p>
+                            </div>
+                          </label>
+                        </div>
+                      ) : (
+                        /* Preview & Decision Bar */
+                        <div className="space-y-4 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                              <Eye className="w-4 h-4 text-amber-600" />
+                              <span>New Picture Preview (Unpublished)</span>
+                            </span>
+                            <span className="text-[11px] text-amber-700 font-medium bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-sm">
+                              Pending Confirmation
+                            </span>
+                          </div>
+
+                          <div className="relative aspect-[16/9] sm:aspect-[21/9] rounded-xl overflow-hidden bg-stone-950 border-2 border-amber-400 shadow-md">
+                            <img
+                              src={bannerPreviewUrl}
+                              alt="New Hero Preview"
+                              className="w-full h-full object-cover object-center"
+                            />
+                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-xs text-white text-[10px] font-bold px-2.5 py-1 rounded-sm uppercase tracking-wider border border-white/20">
+                              Preview Mode
+                            </div>
+                          </div>
+
+                          {selectedBannerFile && (
+                            <p className="text-[11px] text-stone-500">
+                              Selected file: <strong className="text-stone-700">{selectedBannerFile.name}</strong> ({(selectedBannerFile.size / 1024 / 1024).toFixed(2)} MB)
+                            </p>
+                          )}
+
+                          {isUploadingBanner && (
+                            <div className="space-y-1.5 p-3 bg-stone-50 rounded-lg border border-stone-200">
+                              <div className="flex items-center justify-between text-xs text-stone-700">
+                                <span className="font-semibold flex items-center gap-1.5">
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-stone-900" />
+                                  Uploading picture to Supabase Storage...
+                                </span>
+                                <span>Please wait</span>
+                              </div>
+                              <div className="w-full bg-stone-200 h-1.5 rounded-full overflow-hidden">
+                                <div className="bg-stone-900 h-full w-3/4 animate-pulse" />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Action Buttons: Save & Publish vs Cancel */}
+                          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                            <button
+                              type="button"
+                              onClick={handleSaveHeroBanner}
+                              disabled={isUploadingBanner}
+                              className="w-full sm:w-auto py-2.5 px-5 bg-stone-950 hover:bg-stone-800 disabled:bg-stone-400 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                            >
+                              {isUploadingBanner ? (
+                                <>
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Publishing to Homepage...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Save & Publish as Hero Banner</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleCancelBannerUpload}
+                              disabled={isUploadingBanner}
+                              className="w-full sm:w-auto py-2.5 px-4 bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                            >
+                              Cancel & Keep Current Picture
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -1473,36 +1852,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {activeTab === 'analytics' && (
             <div className="space-y-8 max-w-5xl">
               <div>
-                <h1 className="text-2xl font-bold font-display text-stone-950">Store Analytics & Intelligence</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold font-display text-stone-950">Store Analytics & Commercial Performance</h1>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Live Real-Time Data
+                  </span>
+                </div>
                 <p className="text-xs text-stone-500 mt-1">
-                  Commercial data on Pakistan Cash on Delivery sales, conversion metrics, and garment demand.
+                  Comprehensive performance metrics dynamically computed from verified orders, customer purchases, catalog items, and inventory levels in The Vortex Wear system.
                 </p>
               </div>
 
-              {/* KPI Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* KPI Grid (100% Real Store Data) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="p-5 bg-white rounded-xl border border-stone-200 shadow-xs space-y-1">
-                  <span className="text-xs font-semibold text-stone-500">Gross Sales</span>
+                  <span className="text-xs font-semibold text-stone-500">Gross Sales Revenue</span>
                   <div className="text-2xl font-extrabold text-stone-950 font-display tabular-nums">
                     {settings.currency_symbol} {totalSales.toLocaleString()}
                   </div>
-                  <span className="text-[11px] text-emerald-600 font-semibold">100% Cash on Delivery</span>
+                  <span className="text-[11px] text-emerald-600 font-semibold">
+                    {activeOrders.length} active order{activeOrders.length === 1 ? '' : 's'} (COD verified)
+                  </span>
                 </div>
 
                 <div className="p-5 bg-white rounded-xl border border-stone-200 shadow-xs space-y-1">
-                  <span className="text-xs font-semibold text-stone-500">Average Order Value</span>
+                  <span className="text-xs font-semibold text-stone-500">Average Order Value (AOV)</span>
                   <div className="text-2xl font-extrabold text-stone-950 font-display tabular-nums">
-                    {settings.currency_symbol} {orders.length > 0 ? Math.round(totalSales / orders.length).toLocaleString() : '0'}
+                    {settings.currency_symbol} {averageOrderValue.toLocaleString()}
                   </div>
-                  <span className="text-[11px] text-stone-500 font-medium">Across all orders</span>
+                  <span className="text-[11px] text-stone-500 font-medium">
+                    {activeOrders.length > 0 ? `Calculated across ${activeOrders.length} non-cancelled orders` : 'No active orders placed yet'}
+                  </span>
                 </div>
 
                 <div className="p-5 bg-white rounded-xl border border-stone-200 shadow-xs space-y-1">
-                  <span className="text-xs font-semibold text-stone-500">COD Delivery Success</span>
-                  <div className="text-2xl font-extrabold text-emerald-700 font-display tabular-nums">
-                    98.4%
+                  <span className="text-xs font-semibold text-stone-500">Total Customer Accounts</span>
+                  <div className="text-2xl font-extrabold text-stone-950 font-display tabular-nums">
+                    {totalCustomersCount}
                   </div>
-                  <span className="text-[11px] text-stone-500 font-medium">Standard fulfillment</span>
+                  <span className="text-[11px] text-stone-500 font-medium">
+                    Unique customer emails in order history
+                  </span>
                 </div>
 
                 <div className="p-5 bg-white rounded-xl border border-stone-200 shadow-xs space-y-1">
@@ -1510,58 +1900,291 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="text-2xl font-extrabold text-stone-950 font-display tabular-nums">
                     {totalProductsSold}
                   </div>
-                  <span className="text-[11px] text-stone-500 font-medium">Shirts & Pants</span>
+                  <span className="text-[11px] text-stone-500 font-medium">
+                    Total physical shirts & pants ordered
+                  </span>
+                </div>
+
+                <div className="p-5 bg-white rounded-xl border border-stone-200 shadow-xs space-y-1">
+                  <span className="text-xs font-semibold text-stone-500">Available Warehouse Inventory</span>
+                  <div className="text-2xl font-extrabold text-stone-950 font-display tabular-nums">
+                    {totalStockUnits} <span className="text-sm font-normal text-stone-500">units</span>
+                  </div>
+                  <span className="text-[11px] text-stone-500 font-medium">
+                    Across {products.length} products & {products.reduce((acc, p) => acc + p.variants.length, 0)} variants
+                  </span>
+                </div>
+
+                <div className="p-5 bg-white rounded-xl border border-stone-200 shadow-xs space-y-1">
+                  <span className="text-xs font-semibold text-stone-500">Catalog Inventory Asset Value</span>
+                  <div className="text-2xl font-extrabold text-stone-950 font-display tabular-nums">
+                    {settings.currency_symbol} {totalStockValue.toLocaleString()}
+                  </div>
+                  <span className="text-[11px] text-stone-500 font-medium">
+                    Estimated total value at current retail pricing
+                  </span>
                 </div>
               </div>
 
-              {/* Category Breakdown & Fulfillment Funnel */}
+              {/* Order Status Breakdown (Real-Time Order Flow) */}
+              <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-stone-100">
+                  <div>
+                    <h3 className="text-sm font-bold text-stone-950 font-display">Real-Time Order Status Breakdown</h3>
+                    <p className="text-xs text-stone-500">Actual counts across all {totalOrdersCount} store orders recorded in the system.</p>
+                  </div>
+                  <span className="text-xs font-semibold text-stone-700 bg-stone-100 px-3 py-1 rounded-md w-fit">
+                    Total Orders: {totalOrdersCount}
+                  </span>
+                </div>
+
+                {totalOrdersCount === 0 ? (
+                  <div className="py-6 text-center text-xs text-stone-400">
+                    No customer orders recorded yet. As orders are placed, the live status pipeline will automatically reflect them here.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1 text-xs">
+                    <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg space-y-1">
+                      <span className="font-semibold text-amber-900 block">Pending</span>
+                      <div className="text-xl font-extrabold text-amber-950 font-display">{pendingOrdersCount}</div>
+                      <span className="text-[11px] text-amber-700 font-mono">
+                        {Math.round((pendingOrdersCount / totalOrdersCount) * 100)}% of orders
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-1">
+                      <span className="font-semibold text-blue-900 block">Processing</span>
+                      <div className="text-xl font-extrabold text-blue-950 font-display">{processingOrdersCount}</div>
+                      <span className="text-[11px] text-blue-700 font-mono">
+                        {Math.round((processingOrdersCount / totalOrdersCount) * 100)}% of orders
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-lg space-y-1">
+                      <span className="font-semibold text-indigo-900 block">Shipped</span>
+                      <div className="text-xl font-extrabold text-indigo-950 font-display">{shippedOrdersCount}</div>
+                      <span className="text-[11px] text-indigo-700 font-mono">
+                        {Math.round((shippedOrdersCount / totalOrdersCount) * 100)}% of orders
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-1">
+                      <span className="font-semibold text-emerald-900 block">Delivered</span>
+                      <div className="text-xl font-extrabold text-emerald-950 font-display">{deliveredOrdersCount}</div>
+                      <span className="text-[11px] text-emerald-700 font-mono">
+                        {Math.round((deliveredOrdersCount / totalOrdersCount) * 100)}% of orders
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-stone-100 border border-stone-200 rounded-lg space-y-1">
+                      <span className="font-semibold text-stone-700 block">Cancelled</span>
+                      <div className="text-xl font-extrabold text-stone-900 font-display">{cancelledOrdersCount}</div>
+                      <span className="text-[11px] text-stone-500 font-mono">
+                        {Math.round((cancelledOrdersCount / totalOrdersCount) * 100)}% of orders
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Category Breakdown & Regional Delivery Distribution */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Real Category Performance */}
                 <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
-                  <h3 className="text-sm font-bold text-stone-950 font-display">Category Demand Distribution</h3>
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-100">
+                    <h3 className="text-sm font-bold text-stone-950 font-display">Category Performance (Actual Data)</h3>
+                    <span className="text-[11px] text-stone-400">Products & Inventory</span>
+                  </div>
+
                   <div className="space-y-4 text-xs">
-                    <div>
-                      <div className="flex justify-between font-semibold text-stone-800 mb-1.5">
-                        <span>Shirts (Structured Overshirts & Oxford)</span>
-                        <span className="tabular-nums">54% of sales</span>
-                      </div>
-                      <div className="w-full bg-stone-100 rounded-full h-3 overflow-hidden">
-                        <div className="bg-stone-900 h-3 rounded-full" style={{ width: '54%' }} />
-                      </div>
-                    </div>
+                    {categoryPerformance.map((cat) => (
+                      <div key={cat.id} className="p-3 bg-stone-50 rounded-lg border border-stone-100 space-y-2">
+                        <div className="flex items-center justify-between font-semibold text-stone-900">
+                          <span className="text-sm font-bold">{cat.name}</span>
+                          <span className="font-mono text-stone-600">
+                            {cat.productCount} product{cat.productCount === 1 ? '' : 's'} · {cat.stock} in stock
+                          </span>
+                        </div>
 
-                    <div>
-                      <div className="flex justify-between font-semibold text-stone-800 mb-1.5">
-                        <span>Pants (Utility Cargos & Pleated Trousers)</span>
-                        <span className="tabular-nums">46% of sales</span>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-stone-600 pt-1">
+                          <div>
+                            <span className="text-stone-400 block">Units Sold:</span>
+                            <strong className="text-stone-900 text-xs">{cat.unitsSold} units</strong>
+                          </div>
+                          <div>
+                            <span className="text-stone-400 block">Revenue Generated:</span>
+                            <strong className="text-stone-900 text-xs">
+                              {settings.currency_symbol} {cat.revenue.toLocaleString()}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {totalSales > 0 && (
+                          <div className="pt-1">
+                            <div className="flex justify-between text-[10px] text-stone-500 mb-1">
+                              <span>Share of Total Revenue</span>
+                              <span>{cat.shareOfRevenue}%</span>
+                            </div>
+                            <div className="w-full bg-stone-200 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-stone-900 h-1.5 rounded-full transition-all duration-500"
+                                style={{ width: `${Math.min(100, Math.max(0, cat.shareOfRevenue))}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="w-full bg-stone-100 rounded-full h-3 overflow-hidden">
-                        <div className="bg-amber-600 h-3 rounded-full" style={{ width: '46%' }} />
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
 
+                {/* Real Regional Delivery Destinations */}
                 <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
-                  <h3 className="text-sm font-bold text-stone-950 font-display">Top Regional Deliveries (Pakistan)</h3>
-                  <div className="divide-y divide-stone-100 text-xs">
-                    <div className="py-2 flex items-center justify-between">
-                      <span className="font-semibold text-stone-800">Lahore, Punjab</span>
-                      <span className="text-stone-600 font-mono">38% of shipments</span>
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-100">
+                    <h3 className="text-sm font-bold text-stone-950 font-display">Real Customer Shipping Destinations</h3>
+                    <span className="text-[11px] text-stone-400">Order Locations</span>
+                  </div>
+
+                  {topCities.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-stone-400 space-y-1">
+                      <p>No customer shipping records yet.</p>
+                      <p className="text-[11px] text-stone-400">
+                        When customers enter shipping addresses during checkout, cities will be grouped here in real time.
+                      </p>
                     </div>
-                    <div className="py-2 flex items-center justify-between">
-                      <span className="font-semibold text-stone-800">Karachi, Sindh</span>
-                      <span className="text-stone-600 font-mono">27% of shipments</span>
+                  ) : (
+                    <div className="divide-y divide-stone-100 text-xs">
+                      {topCities.map(({ city, count, percentage }) => (
+                        <div key={city} className="py-2.5 flex items-center justify-between">
+                          <span className="font-semibold text-stone-800">{city}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-stone-500 font-mono text-[11px]">{count} order{count === 1 ? '' : 's'}</span>
+                            <span className="text-stone-800 font-bold font-mono text-[11px] bg-stone-100 px-2 py-0.5 rounded">
+                              {percentage}%
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="py-2 flex items-center justify-between">
-                      <span className="font-semibold text-stone-800">Islamabad / Rawalpindi</span>
-                      <span className="text-stone-600 font-mono">21% of shipments</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Best-Selling Products Leaderboard (Actual Store Sales) */}
+              <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-stone-100">
+                  <div>
+                    <h3 className="text-sm font-bold text-stone-950 font-display">Product Performance & Sales Leaderboard</h3>
+                    <p className="text-xs text-stone-500">Products sorted by actual customer volume sold and gross revenue.</p>
+                  </div>
+                  <span className="text-xs text-stone-500">
+                    {productSalesList.length} Catalog Items
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-semibold uppercase tracking-wider text-[11px]">
+                      <tr>
+                        <th className="py-2.5 px-3">Product Name</th>
+                        <th className="py-2.5 px-3 text-right">Units Sold</th>
+                        <th className="py-2.5 px-3 text-right">Gross Sales</th>
+                        <th className="py-2.5 px-3 text-right">Remaining Stock</th>
+                        <th className="py-2.5 px-3 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {productSalesList.map((prod) => (
+                        <tr key={prod.id} className="hover:bg-stone-50/50 transition-colors">
+                          <td className="py-2.5 px-3 font-semibold text-stone-900">
+                            {prod.name}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-stone-900">
+                            {prod.unitsSold}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-stone-900 font-semibold">
+                            {settings.currency_symbol} {prod.revenue.toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-stone-600">
+                            {prod.currentStock} units
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            {prod.currentStock <= 0 ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                                Sold Out
+                              </span>
+                            ) : prod.currentStock <= 5 ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                Low Stock
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                In Stock
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Real Inventory Health & Low-Stock Alerts */}
+              <div className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-100">
+                  <div>
+                    <h3 className="text-sm font-bold text-stone-950 font-display">Inventory Stock Levels & Alerts</h3>
+                    <p className="text-xs text-stone-500">Live monitoring of variants with 5 or fewer items remaining.</p>
+                  </div>
+                  <span className="text-xs font-semibold text-stone-600">
+                    Threshold: ≤ 5 units
+                  </span>
+                </div>
+
+                {lowStockVariants.length === 0 ? (
+                  <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>All catalog variants have healthy inventory levels. No items are currently below the low-stock alert threshold.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 p-2.5 rounded-lg flex items-center justify-between">
+                      <span>Attention: {lowStockVariants.length} variant{lowStockVariants.length === 1 ? '' : 's'} require restocking attention.</span>
+                      <button
+                        onClick={() => handleTabChange('inventory')}
+                        className="underline hover:text-amber-950 font-bold"
+                      >
+                        Manage Inventory →
+                      </button>
                     </div>
-                    <div className="py-2 flex items-center justify-between">
-                      <span className="font-semibold text-stone-800">Faisalabad, Multan & Other</span>
-                      <span className="text-stone-600 font-mono">14% of shipments</span>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-semibold uppercase tracking-wider text-[11px]">
+                          <tr>
+                            <th className="py-2 px-3">Garment</th>
+                            <th className="py-2 px-3">Size / Color</th>
+                            <th className="py-2 px-3">SKU</th>
+                            <th className="py-2 px-3 text-right">Units Remaining</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-stone-100">
+                          {lowStockVariants.map((v) => (
+                            <tr key={v.id} className="hover:bg-amber-50/30">
+                              <td className="py-2 px-3 font-semibold text-stone-900">{v.productName}</td>
+                              <td className="py-2 px-3 text-stone-600">{v.size} · {v.color}</td>
+                              <td className="py-2 px-3 font-mono text-stone-500 text-[11px]">{v.sku}</td>
+                              <td className="py-2 px-3 text-right font-bold text-amber-700 font-mono">
+                                {v.stock_quantity}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           )}

@@ -73,11 +73,12 @@ export const ContactPage: React.FC<PageProps> = () => {
             </div>
 
             <div className="flex items-start gap-3">
-              <MapPin className="w-4 h-4 text-stone-700 mt-0.5" />
+              <Mail className="w-4 h-4 text-stone-700 mt-0.5" />
               <div>
-                <p className="font-semibold text-stone-900">Distribution Headquarters</p>
-                <p className="text-stone-600">Lahore / Karachi, Pakistan</p>
-                <p className="text-[11px] text-stone-400">Nationwide courier fulfillment via Leopards & TCS</p>
+                <p className="font-semibold text-stone-900">Our other Email</p>
+                <a href="mailto:samiakram583@gmail.com" className="text-stone-600 hover:underline">
+                  samiakram583@gmail.com
+                </a>
               </div>
             </div>
           </div>

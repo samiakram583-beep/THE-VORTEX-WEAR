@@ -2,7 +2,7 @@ import React from 'react';
 import { Heart, ShoppingBag, Eye } from 'lucide-react';
 import { Product } from '../lib/types';
 import { useStore } from '../lib/store';
-import categoryShirts from '../assets/images/category_shirts_vortex_1790956364111.jpg';
+import { categoryShirtsVortex, resolveImageUrl } from '../assets/images';
 
 interface ProductCardProps {
   product: Product;
@@ -10,33 +10,18 @@ interface ProductCardProps {
   onNavigate: (slug: string) => void;
 }
 
-export const ProductCard: React.FC<ProductCardProps> = ({
-  product,
-  onQuickView,
-  onNavigate,
-}) => {
+export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView, onNavigate }) => {
   const { isInWishlist, toggleWishlist, addToCart, settings } = useStore();
   const isWishlisted = isInWishlist(product.id);
 
-  const primaryImage =
-    product.images.find((img) => img.is_primary)?.image_url ||
-    product.images[0]?.image_url;
+  const rawPrimary = product.images.find((img) => img.is_primary)?.image_url || product.images[0]?.image_url;
+  const primaryImage = resolveImageUrl(rawPrimary, categoryShirtsVortex);
 
-  const secondaryImage =
-    product.images[1]?.image_url || primaryImage;
-
-  const defaultVariant =
-    product.variants.find(
-      (v) => v.is_active && v.stock_quantity > 0
-    ) || product.variants[0];
-
-  const isSoldOut = !product.variants.some(
-    (v) => v.is_active && v.stock_quantity > 0
-  );
+  const defaultVariant = product.variants.find((v) => v.is_active && v.stock_quantity > 0) || product.variants[0];
+  const isSoldOut = !product.variants.some((v) => v.is_active && v.stock_quantity > 0);
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
-
     if (defaultVariant && !isSoldOut) {
       addToCart(product, defaultVariant, 1);
     }
@@ -61,11 +46,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             referrerPolicy="no-referrer"
             loading="lazy"
             onError={(e) => {
-              // Use a bundled Vite asset as the safe fallback.
-              // This works correctly in production builds.
-              if (e.currentTarget.src !== categoryShirts) {
-                e.currentTarget.src = categoryShirts;
-              }
+              // Safe fallback image
+              e.currentTarget.src = categoryShirtsVortex;
             }}
             className="w-full h-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-105"
           />
@@ -75,7 +57,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         )}
 
-        {/* Status indicator */}
+        {/* Status indicator (single, unboxed subtle label) */}
         <div className="absolute top-2.5 left-2.5 sm:top-3 sm:left-3 flex flex-col gap-1">
           {isSoldOut ? (
             <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-rose-600 bg-white/95 px-2 py-0.5 rounded-xs shadow-xs">
@@ -92,23 +74,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           ) : null}
         </div>
 
-        {/* Wishlist Button */}
+        {/* Wishlist Button - comfortable touch target */}
         <button
           onClick={handleWishlistClick}
-          aria-label={
-            isWishlisted
-              ? 'Remove from wishlist'
-              : 'Add to wishlist'
-          }
+          aria-label={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
           className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-white/90 backdrop-blur-xs flex items-center justify-center text-stone-700 hover:text-stone-950 hover:bg-white shadow-xs transition-transform active:scale-90"
         >
-          <Heart
-            className={`w-4 h-4 transition-colors ${
-              isWishlisted
-                ? 'fill-rose-500 text-rose-500'
-                : ''
-            }`}
-          />
+          <Heart className={`w-4 h-4 transition-colors ${isWishlisted ? 'fill-rose-500 text-rose-500' : ''}`} />
         </button>
 
         {/* Hover Quick Actions */}
@@ -122,7 +94,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               Quick Add
             </button>
           )}
-
           {onQuickView && (
             <button
               onClick={(e) => {
@@ -141,16 +112,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       {/* Content & Metadata */}
       <div className="p-4 flex flex-col flex-1 justify-between gap-2">
         <div>
+          {/* Unboxed metadata separator */}
           <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-stone-500 mb-1">
-            <span>
-              {product.category_name ||
-                (product.category_id.includes('shirt')
-                  ? 'Shirts'
-                  : 'Pants')}
-            </span>
-
+            <span>{product.category_name || (product.category_id.includes('shirt') ? 'Shirts' : 'Pants')}</span>
             <span aria-hidden="true">·</span>
-
             <span>{product.sku}</span>
           </div>
 
@@ -165,27 +130,21 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             {product.sale_price ? (
               <>
                 <span className="text-sm font-bold text-stone-950 font-display">
-                  {settings.currency_symbol}{' '}
-                  {product.sale_price.toLocaleString()}
+                  {settings.currency_symbol} {product.sale_price.toLocaleString()}
                 </span>
-
                 <span className="text-xs text-stone-400 line-through">
-                  {settings.currency_symbol}{' '}
-                  {product.base_price.toLocaleString()}
+                  {settings.currency_symbol} {product.base_price.toLocaleString()}
                 </span>
               </>
             ) : (
               <span className="text-sm font-bold text-stone-950 font-display">
-                {settings.currency_symbol}{' '}
-                {product.base_price.toLocaleString()}
+                {settings.currency_symbol} {product.base_price.toLocaleString()}
               </span>
             )}
           </div>
 
           <div className="text-[11px] text-stone-500">
-            {product.variants.length > 1
-              ? `${product.variants.length} options`
-              : `${defaultVariant?.size || 'Standard'}`}
+            {product.variants.length > 1 ? `${product.variants.length} options` : `${defaultVariant?.size || 'Standard'}`}
           </div>
         </div>
       </div>

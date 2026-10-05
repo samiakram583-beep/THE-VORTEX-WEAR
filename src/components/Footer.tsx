@@ -83,6 +83,13 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                 </a>
               </p>
               <p className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-stone-400" />
+                <span>Our other Email:</span>
+                <a href="mailto:samiakram583@gmail.com" className="hover:text-white transition-colors underline">
+                  samiakram583@gmail.com
+                </a>
+              </p>
+              <p className="flex items-center gap-2">
                 <Phone className="w-4 h-4 text-[#25D366]" />
                 <a
                   href={`https://wa.me/${settings.whatsapp_number.replace(/[^0-9]/g, '')}`}
@@ -154,11 +161,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <li>
                 <button onClick={() => onNavigate('/return-policy')} className="hover:text-white transition-colors">
                   Returns & Exchanges
-                </button>
-              </li>
-              <li>
-                <button onClick={() => onNavigate('/track-order')} className="hover:text-white transition-colors">
-                  Track My Order
                 </button>
               </li>
             </ul>

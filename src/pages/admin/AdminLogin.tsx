@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Shield, Lock, Mail, KeyRound, ArrowRight, ArrowLeft, AlertCircle, CheckCircle2, ShieldAlert, Database, Key } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Lock, Mail, KeyRound, ArrowRight, ArrowLeft, AlertCircle, CheckCircle2, ShieldAlert, Database, Key, UserCheck } from 'lucide-react';
 import { AdminAuthService } from '../../lib/adminAuth';
 import {
   supabase,
@@ -20,9 +20,11 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   onExit,
   unauthorizedNotice,
 }) => {
-  const [step, setStep] = useState<'credentials' | 'mfa' | 'forgot' | 'config'>('credentials');
+  const [step, setStep] = useState<'credentials' | 'mfa' | 'forgot' | 'activate' | 'update_password' | 'config'>('credentials');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [mfaChallengeId, setMfaChallengeId] = useState('');
   const [anonKeyInput, setAnonKeyInput] = useState('');
@@ -31,21 +33,40 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   const [errorMessage, setErrorMessage] = useState(unauthorizedNotice || '');
   const [successMessage, setSuccessMessage] = useState('');
 
+  const AUTHORIZED_ADMIN_LIST = [
+    'samiakram583@gmail.com',
+    'bilalakram1048@gmail.com',
+  ];
+
+  // Listen for Supabase password recovery callback from email links
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
+      setStep('update_password');
+      setSuccessMessage('Password recovery token validated. Please set your new secure administrator password.');
+    }
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setStep('update_password');
+        setSuccessMessage('Password recovery session initiated. Please set your new secure administrator password.');
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
   // Step 1: Strict credential verification against Supabase Auth & server allowlist
   const handleCredentialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setSuccessMessage('');
     setIsLoading(true);
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // 1. Strict Allowlist check: Only the two designated administrators are authorized
-    const AUTHORIZED_ADMIN_LIST = [
-      'samiakram583@gmail.com',
-      'bilalakram1048@gmail.com',
-      'bilalakram104@gmail.com',
-    ];
-
+    // 1. Strict Allowlist check: Only designated administrators are authorized
     if (!AUTHORIZED_ADMIN_LIST.includes(normalizedEmail)) {
       AdminAuthService.clearSession();
       setErrorMessage('Invalid email or password.');
@@ -54,12 +75,12 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
     }
 
     try {
-      // 1. Sync Supabase client configuration from server if not already active
+      // Sync Supabase client configuration from server if not already active
       if (!isSupabaseConfigured) {
         await syncSupabaseConfigFromServer();
       }
 
-      // 2. Real Supabase Auth authentication if Supabase client is connected
+      // Real Supabase Auth authentication if Supabase client is connected
       if (isSupabaseConfigured) {
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
@@ -69,15 +90,17 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         // WRONG PASSWORD OR SUPABASE AUTH FAILURE
         if (authError || !authData?.user) {
           AdminAuthService.clearSession();
-          console.error('[SUPABASE AUTH LOGIN ERROR]', authError);
+          console.warn('[SUPABASE AUTH LOGIN ATTEMPT]', authError?.message || 'Login attempt rejected');
           const rawMsg = authError?.message || '';
           let userMsg = 'Invalid email or password.';
           if (rawMsg.toLowerCase().includes('email not confirmed')) {
-            userMsg = 'Supabase Auth: Email address not confirmed. Please confirm your email in Supabase Authentication.';
+            userMsg = 'Supabase Auth: Email address not confirmed. Please check your inbox or confirm your email in Supabase Authentication.';
           } else if (rawMsg.toLowerCase().includes('invalid api key')) {
             userMsg = 'Supabase Auth: Invalid API Key. Please verify your Supabase Anon/Publishable key.';
           } else if (rawMsg.toLowerCase().includes('rate limit')) {
             userMsg = 'Supabase Auth: Rate limit exceeded. Please wait a few moments before retrying.';
+          } else if (rawMsg.toLowerCase().includes('invalid login credentials') || rawMsg.toLowerCase().includes('invalid_grant')) {
+            userMsg = 'Invalid email or password. If you have not set up your administrator password yet or forgot it, please choose an option below.';
           } else if (rawMsg) {
             userMsg = rawMsg;
           }
@@ -86,7 +109,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
           return;
         }
 
-        // 3. Verify that the authenticated user is on the authorized allowlist
+        // Verify that the authenticated user is on the authorized allowlist
         const userEmail = (authData.user.email || normalizedEmail).toLowerCase();
         if (!AUTHORIZED_ADMIN_LIST.includes(userEmail)) {
           await supabase.auth.signOut();
@@ -96,7 +119,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
           return;
         }
 
-        // 4. Sync with server-side administrator session
+        // Sync with server-side administrator session
         const syncRes = await AdminAuthService.syncSupabaseSession(
           normalizedEmail,
           authData.user,
@@ -115,7 +138,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         return;
       }
 
-      // 3. Server authentication gateway (validates credentials strictly on server with Supabase)
+      // Server authentication gateway (validates credentials strictly on server with Supabase)
       const res = await AdminAuthService.requestLogin(normalizedEmail, password);
 
       if (!res.success) {
@@ -139,12 +162,173 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
       }
     } catch (err: any) {
       AdminAuthService.clearSession();
+      console.warn('[ADMIN LOGIN EXCEPTION]', err);
       setErrorMessage(err?.message || 'Authentication failure.');
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Step 2: First-Time Setup / Activate Admin Account
+  const handleActivateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!AUTHORIZED_ADMIN_LIST.includes(normalizedEmail)) {
+      setErrorMessage('Access denied: only designated administrators (samiakram583@gmail.com, bilalakram1048@gmail.com) can activate administrator accounts.');
+      return;
+    }
+
+    if (password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters long.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (!isSupabaseConfigured) {
+        await syncSupabaseConfigFromServer();
+      }
+
+      if (isSupabaseConfigured) {
+        const adminName = normalizedEmail.includes('sami') ? 'Sami Akram (Primary Owner)' : 'Bilal Akram';
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            data: {
+              full_name: adminName,
+              role: 'admin',
+            },
+          },
+        });
+
+        if (signUpError) {
+          console.warn('[ADMIN ACTIVATION WARN]', signUpError.message);
+          if (signUpError.message.toLowerCase().includes('already registered')) {
+            setErrorMessage('An account for this email is already registered in Supabase. If you forgot your password, please click "Forgot Password?" below to reset it.');
+          } else {
+            setErrorMessage(signUpError.message);
+          }
+          setIsLoading(false);
+          return;
+        }
+
+        if (signUpData?.session) {
+          const syncRes = await AdminAuthService.syncSupabaseSession(
+            normalizedEmail,
+            signUpData.user,
+            signUpData.session.access_token
+          );
+          if (syncRes.success) {
+            onLoginSuccess();
+            return;
+          }
+        }
+
+        setSuccessMessage(`Administrator account registered for ${normalizedEmail}! Please check your email inbox to confirm, then sign in.`);
+        setStep('credentials');
+      } else {
+        setErrorMessage('Supabase Anon Key is required to register administrator credentials.');
+        setStep('config');
+      }
+    } catch (err: any) {
+      console.warn('[ADMIN ACTIVATION EXCEPTION]', err);
+      setErrorMessage(err?.message || 'Failed to activate administrator account.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Step 3: Password Reset Request
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+    setIsLoading(true);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!AUTHORIZED_ADMIN_LIST.includes(normalizedEmail)) {
+      setErrorMessage('Access denied: only designated administrators may request recovery.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      if (isSupabaseConfigured) {
+        const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+          redirectTo: `${window.location.origin}/admin`,
+        });
+        if (error) {
+          console.warn('[RESET PASSWORD WARN]', error.message);
+          setErrorMessage(error.message);
+          setIsLoading(false);
+          return;
+        }
+      }
+      setSuccessMessage(`Password recovery link dispatched to ${normalizedEmail}. Please check your email inbox and spam folder.`);
+    } catch (err: any) {
+      console.warn('[RESET PASSWORD EXCEPTION]', err);
+      setErrorMessage(err?.message || 'Failed to dispatch recovery email.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Step 4: Set New Password after recovery link click
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    if (newPassword.length < 8) {
+      setErrorMessage('Password must be at least 8 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setErrorMessage('Passwords do not match. Please re-enter.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        console.warn('[UPDATE PASSWORD WARN]', error.message);
+        setErrorMessage(error.message);
+        setIsLoading(false);
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+
+      const userEmail = data.user?.email || email;
+      const syncRes = await AdminAuthService.syncSupabaseSession(
+        userEmail,
+        data.user,
+        data.user?.id
+      );
+
+      if (syncRes.success) {
+        onLoginSuccess();
+      } else {
+        setSuccessMessage('Password updated successfully! Please sign in with your new password.');
+        setStep('credentials');
+        setPassword(newPassword);
+      }
+    } catch (err: any) {
+      console.warn('[UPDATE PASSWORD EXCEPTION]', err);
+      setErrorMessage(err?.message || 'Failed to update password.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Step 5: Save Supabase Anon Key
   const handleSaveSupabaseKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!anonKeyInput.trim() || anonKeyInput.trim().length < 15) {
@@ -155,7 +339,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
     setErrorMessage('');
     try {
       await setRuntimeSupabaseKey(anonKeyInput.trim());
-      // Verify with server endpoint
       const testRes = await fetch('/api/admin/config/test-supabase-connection');
       const testData = await testRes.json().catch(() => ({}));
       if (testRes.ok && testData.connected) {
@@ -165,13 +348,14 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
       }
       setStep('credentials');
     } catch (err: any) {
+      console.warn('[SAVE KEY EXCEPTION]', err);
       setErrorMessage(err?.message || 'Failed to save configuration.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Step 2: Verify Multi-Factor Authentication Code
+  // Step 6: Verify Multi-Factor Authentication Code
   const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
@@ -188,14 +372,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
 
       onLoginSuccess();
     } catch (err: any) {
+      console.warn('[MFA EXCEPTION]', err);
       setErrorMessage(err?.message || 'Failed to verify two-factor code.');
       setIsLoading(false);
     }
-  };
-
-  const handleForgotPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSuccessMessage('If this email address is an authorized administrator, an encrypted password reset token has been dispatched via Supabase Auth.');
   };
 
   return (
@@ -204,7 +384,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
       <div className="flex items-center justify-between max-w-5xl mx-auto w-full">
         <button
           onClick={onExit}
-          className="flex items-center gap-2 text-xs font-semibold text-stone-400 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-xs font-semibold text-stone-400 hover:text-white transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Return to The Vortex Wear Storefront
@@ -231,6 +411,12 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               ? 'Admin Portal'
               : step === 'mfa'
               ? 'Two-Factor Authentication'
+              : step === 'activate'
+              ? 'Activate Admin Account'
+              : step === 'update_password'
+              ? 'Set New Password'
+              : step === 'config'
+              ? 'Supabase Configuration'
               : 'Admin Password Reset'}
           </h1>
           <p className="text-xs text-stone-400 leading-relaxed">
@@ -238,6 +424,12 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               ? 'Authorized store administrator access only. All actions and sessions are cryptographically logged.'
               : step === 'mfa'
               ? 'Enter the 6-digit TOTP verification code from your authenticator app.'
+              : step === 'activate'
+              ? 'Set up initial administrator credentials for authorized emails.'
+              : step === 'update_password'
+              ? 'Enter and confirm your new secure administrator password.'
+              : step === 'config'
+              ? 'Provide your Supabase Project Anon/Publishable API Key.'
               : 'Enter your verified administrator email address to receive password reset instructions.'}
           </p>
         </div>
@@ -246,7 +438,34 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         {errorMessage && (
           <div className="p-3.5 bg-rose-950/60 border border-rose-800/80 rounded-lg text-xs text-rose-300 flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
-            <span className="leading-relaxed">{errorMessage}</span>
+            <div className="flex-1 space-y-2">
+              <span className="leading-relaxed block">{errorMessage}</span>
+              {(errorMessage.includes('Invalid') || errorMessage.includes('password') || errorMessage.includes('credentials')) && step === 'credentials' && (
+                <div className="pt-2 border-t border-rose-900/60 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMessage('');
+                      setStep('forgot');
+                    }}
+                    className="text-amber-300 hover:text-white underline font-medium cursor-pointer"
+                  >
+                    Reset Password via Email →
+                  </button>
+                  <span className="text-rose-500">·</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMessage('');
+                      setStep('activate');
+                    }}
+                    className="text-amber-300 hover:text-white underline font-medium cursor-pointer"
+                  >
+                    First-Time Setup / Activate →
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -268,7 +487,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                   type="email"
                   required
                   autoFocus
-                  placeholder="admin@vortexwear.pk"
+                  placeholder="samiakram583@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-3 py-2.5 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
@@ -283,9 +502,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                   type="button"
                   onClick={() => {
                     setErrorMessage('');
+                    setSuccessMessage('');
                     setStep('forgot');
                   }}
-                  className="text-[11px] text-stone-400 hover:text-white transition-colors"
+                  className="text-[11px] text-stone-400 hover:text-white transition-colors cursor-pointer"
                 >
                   Forgot Password?
                 </button>
@@ -318,20 +538,29 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               )}
             </button>
 
-            <div className="pt-2 flex items-center justify-between text-[11px] text-stone-500">
-              <span className="flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-stone-400" />
-                <span>Supabase: <strong className={isSupabaseConfigured ? 'text-emerald-400' : 'text-amber-400'}>{isSupabaseConfigured ? 'Active' : 'Key Required'}</strong></span>
-              </span>
+            <div className="pt-3 border-t border-stone-800/80 flex items-center justify-between text-[11px] text-stone-400">
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage('');
+                  setSuccessMessage('');
+                  setStep('activate');
+                }}
+                className="hover:text-white text-stone-400 flex items-center gap-1 cursor-pointer"
+              >
+                <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span>First-time setup? Activate account</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
                   setErrorMessage('');
                   setStep('config');
                 }}
-                className="text-stone-400 hover:text-amber-400 underline transition-colors"
+                className="hover:text-amber-400 underline transition-colors cursor-pointer"
               >
-                Configure Anon Key
+                Configure Key
               </button>
             </div>
           </form>
@@ -362,7 +591,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
             <button
               type="submit"
               disabled={isLoading || mfaCode.length < 6}
-              className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 disabled:bg-stone-700 disabled:text-stone-500 text-stone-950 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg"
+              className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 disabled:bg-stone-700 disabled:text-stone-500 text-stone-950 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
             >
               {isLoading ? <span>Validating MFA Token...</span> : <span>Verify & Grant Access</span>}
             </button>
@@ -373,7 +602,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                 setStep('credentials');
                 setErrorMessage('');
               }}
-              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors"
+              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors cursor-pointer"
             >
               Back to Credentials
             </button>
@@ -384,22 +613,30 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         {step === 'forgot' && (
           <form onSubmit={handleForgotPassword} className="space-y-4 text-xs">
             <div>
-              <label className="block font-semibold text-stone-300 mb-1.5">Administrator Email</label>
-              <input
-                type="email"
-                required
-                placeholder="admin@vortexwear.pk"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full py-2.5 px-3 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
-              />
+              <label className="block font-semibold text-stone-300 mb-1.5">Authorized Administrator Email</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 absolute left-3.5 top-3 text-stone-500" />
+                <input
+                  type="email"
+                  required
+                  autoFocus
+                  placeholder="samiakram583@gmail.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
+                />
+              </div>
+              <p className="text-[11px] text-stone-400 mt-1.5">
+                Supabase Auth will dispatch a cryptographically signed password reset link to this email address.
+              </p>
             </div>
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 bg-white hover:bg-stone-200 text-stone-950 text-xs font-bold rounded-lg transition-colors"
+              disabled={isLoading}
+              className="w-full py-2.5 px-4 bg-white hover:bg-stone-200 disabled:bg-stone-600 text-stone-950 text-xs font-bold rounded-lg transition-colors cursor-pointer"
             >
-              Send Secure Recovery Token
+              {isLoading ? 'Dispatching Recovery Email...' : 'Send Recovery Email via Supabase Auth'}
             </button>
 
             <button
@@ -409,14 +646,133 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                 setErrorMessage('');
                 setSuccessMessage('');
               }}
-              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors"
+              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors cursor-pointer"
             >
               Return to Login
             </button>
           </form>
         )}
 
-        {/* STEP 4: SUPABASE PROJECT CONFIGURATION */}
+        {/* STEP 4: FIRST-TIME SETUP / ACTIVATE ADMIN ACCOUNT */}
+        {step === 'activate' && (
+          <form onSubmit={handleActivateAdmin} className="space-y-4 text-xs">
+            <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg text-[11px] text-amber-200">
+              Only authorized administrator emails (<strong>samiakram583@gmail.com</strong> or <strong>bilalakram1048@gmail.com</strong>) can register administrator credentials.
+            </div>
+
+            <div>
+              <label className="block font-semibold text-stone-300 mb-1.5">Administrator Email</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 absolute left-3.5 top-3 text-stone-500" />
+                <input
+                  type="email"
+                  required
+                  autoFocus
+                  placeholder="samiakram583@gmail.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-stone-300 mb-1.5">Choose Admin Password (min 8 characters)</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-3.5 top-3 text-stone-500" />
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  placeholder="••••••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 disabled:bg-stone-600 text-stone-950 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+            >
+              {isLoading ? 'Creating Account in Supabase Auth...' : 'Register / Activate Admin Credentials'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStep('credentials');
+                setErrorMessage('');
+                setSuccessMessage('');
+              }}
+              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors cursor-pointer"
+            >
+              Return to Login
+            </button>
+          </form>
+        )}
+
+        {/* STEP 5: UPDATE PASSWORD (AFTER RECOVERY LINK) */}
+        {step === 'update_password' && (
+          <form onSubmit={handleUpdatePassword} className="space-y-4 text-xs">
+            <div>
+              <label className="block font-semibold text-stone-300 mb-1.5">New Administrator Password</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-3.5 top-3 text-stone-500" />
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  autoFocus
+                  placeholder="Minimum 8 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-stone-300 mb-1.5">Confirm New Password</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-3.5 top-3 text-stone-500" />
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  placeholder="Re-enter new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-stone-900/80 border border-stone-700 rounded-lg text-white placeholder:text-stone-600 focus:outline-hidden focus:border-amber-400 transition-colors"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:bg-stone-600 text-stone-950 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+            >
+              {isLoading ? 'Updating Password in Supabase...' : 'Set New Password & Enter Admin Portal'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStep('credentials');
+                setErrorMessage('');
+                setSuccessMessage('');
+              }}
+              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors cursor-pointer"
+            >
+              Cancel & Return to Login
+            </button>
+          </form>
+        )}
+
+        {/* STEP 6: SUPABASE PROJECT CONFIGURATION */}
         {step === 'config' && (
           <form onSubmit={handleSaveSupabaseKey} className="space-y-4 text-xs">
             <div className="p-3 bg-stone-900 border border-stone-700 rounded-lg space-y-1">
@@ -449,7 +805,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>Save & Connect Supabase</span>
@@ -461,7 +817,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                 setStep('credentials');
                 setErrorMessage('');
               }}
-              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors"
+              className="w-full text-center text-xs text-stone-400 hover:text-white py-1 transition-colors cursor-pointer"
             >
               Return to Login
             </button>
@@ -471,7 +827,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         {/* Footer Security Notice */}
         <div className="pt-4 border-t border-stone-800 text-[11px] text-stone-500 text-center leading-relaxed">
           <p>
-            The Vortex Wear Security Protocol v2.4. Strictly enforced server-side authentication with session expiration and automated intrusion logging.
+            The Vortex Wear Security Protocol v2.5. Strictly enforced server-side authentication with session expiration and automated intrusion logging.
           </p>
         </div>
       </div>

@@ -21,6 +21,7 @@ import {
   INITIAL_REVIEWS,
   INITIAL_SETTINGS,
 } from './initialData';
+import { resolveImageUrl } from '../assets/images';
 import { AdminAuthService } from './adminAuth';
 import {
   supabase,
@@ -203,9 +204,30 @@ function setStorage<T>(key: string, value: T): void {
 }
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [products, setProducts] = useState<Product[]>(() => getStorage(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS));
-  const [categories, setCategories] = useState<Category[]>(() => getStorage(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES));
-  const [banners, setBanners] = useState<Banner[]>(() => getStorage(STORAGE_KEYS.BANNERS, INITIAL_BANNERS));
+  const [products, setProducts] = useState<Product[]>(() => {
+    const raw = getStorage<Product[]>(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
+    return (raw || []).map((p) => ({
+      ...p,
+      images: (p.images || []).map((img) => ({
+        ...img,
+        image_url: resolveImageUrl(img.image_url),
+      })),
+    }));
+  });
+  const [categories, setCategories] = useState<Category[]>(() => {
+    const raw = getStorage<Category[]>(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES);
+    return (raw || []).map((c) => ({
+      ...c,
+      image_url: resolveImageUrl(c.image_url),
+    }));
+  });
+  const [banners, setBanners] = useState<Banner[]>(() => {
+    const raw = getStorage<Banner[]>(STORAGE_KEYS.BANNERS, INITIAL_BANNERS);
+    return (raw || []).map((b) => ({
+      ...b,
+      image_url: resolveImageUrl(b.image_url),
+    }));
+  });
   const [coupons, setCoupons] = useState<Coupon[]>(() => getStorage(STORAGE_KEYS.COUPONS, INITIAL_COUPONS));
   const [reviews, setReviews] = useState<Review[]>(() => getStorage(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS));
   const [orders, setOrders] = useState<Order[]>(() => getStorage(STORAGE_KEYS.ORDERS, []));

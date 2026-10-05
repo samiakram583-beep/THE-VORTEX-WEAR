@@ -20,8 +20,7 @@ app.use(express.json());
 // ==============================================================================
 const DEFAULT_AUTHORIZED_ADMINS = [
   'samiakram583@gmail.com',    // The Vortex Wear Primary Owner / Admin
-  'bilalakram1048@gmail.com',  // Second Authorized Admin (Bilal Akram)
-  'bilalakram104@gmail.com',   // Second Authorized Admin alias
+  'bilalakram1048@gmail.com',  // Authorized Admin (Bilal Akram)
 ];
 
 const AUTHORIZED_ADMIN_EMAILS = (process.env.AUTHORIZED_ADMIN_EMAILS
@@ -283,7 +282,7 @@ app.post('/api/admin/auth/login', async (req: Request, res: Response) => {
       message: `Authentication successful. Welcome back, ${session.adminName}.`,
     });
   } catch (err: any) {
-    console.error('[AUTH ERROR]', err);
+    console.warn('[AUTH ERROR]', err?.message || err);
     return res.status(500).json({
       error: 'SERVER_AUTH_ERROR',
       message: 'Failed to communicate with authentication provider.',
