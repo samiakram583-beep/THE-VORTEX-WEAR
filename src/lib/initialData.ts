@@ -20,7 +20,7 @@ export const INITIAL_SETTINGS: SiteSettings = {
 
 export const INITIAL_CATEGORIES: Category[] = [
   {
-    id: 'c-shirts',
+    id: 'c1000000-0000-0000-0000-000000000001',
     name: 'Shirts',
     slug: 'shirts',
     description: 'Structured overshirts, refined oxford twill, and modern breathable essentials tailored for everyday elegance.',
@@ -29,7 +29,7 @@ export const INITIAL_CATEGORIES: Category[] = [
     sort_order: 1,
   },
   {
-    id: 'c-pants',
+    id: 'c2000000-0000-0000-0000-000000000002',
     name: 'Pants',
     slug: 'pants',
     description: 'Precision tailored trousers, tactical utility cargos, and relaxed pleated pants engineered with premium durable fabric.',
@@ -91,7 +91,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   // 5 SHIRTS
   {
     id: 'prod-s1',
-    category_id: 'c-shirts',
+    category_id: 'c1000000-0000-0000-0000-000000000001',
     category_slug: 'shirts',
     category_name: 'Shirts',
     name: 'Vortex Onyx Structured Overshirt',
@@ -137,7 +137,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-s2',
-    category_id: 'c-shirts',
+    category_id: 'c1000000-0000-0000-0000-000000000001',
     category_slug: 'shirts',
     category_name: 'Shirts',
     name: 'Atelier Oxford Tailored Shirt',
@@ -173,7 +173,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-s3',
-    category_id: 'c-shirts',
+    category_id: 'c1000000-0000-0000-0000-000000000001',
     category_slug: 'shirts',
     category_name: 'Shirts',
     name: 'Raw Linen Relaxed Camp Collar Shirt',
@@ -209,7 +209,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-s4',
-    category_id: 'c-shirts',
+    category_id: 'c1000000-0000-0000-0000-000000000001',
     category_slug: 'shirts',
     category_name: 'Shirts',
     name: 'Monochrome Minimalist Poplin Shirt',
@@ -243,7 +243,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-s5',
-    category_id: 'c-shirts',
+    category_id: 'c1000000-0000-0000-0000-000000000001',
     category_slug: 'shirts',
     category_name: 'Shirts',
     name: 'Heavyweight Utility Twill Overshirt',
@@ -280,7 +280,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   // 5 PANTS
   {
     id: 'prod-p1',
-    category_id: 'c-pants',
+    category_id: 'c2000000-0000-0000-0000-000000000002',
     category_slug: 'pants',
     category_name: 'Pants',
     name: 'Vortex Tactical Utility Cargo Pants',
@@ -325,7 +325,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-p2',
-    category_id: 'c-pants',
+    category_id: 'c2000000-0000-0000-0000-000000000002',
     category_slug: 'pants',
     category_name: 'Pants',
     name: 'Tailored Pleated Wool-Blend Trousers',
@@ -360,7 +360,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-p3',
-    category_id: 'c-pants',
+    category_id: 'c2000000-0000-0000-0000-000000000002',
     category_slug: 'pants',
     category_name: 'Pants',
     name: 'Everyday Slim Stretch Chino Pants',
@@ -395,7 +395,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-p4',
-    category_id: 'c-pants',
+    category_id: 'c2000000-0000-0000-0000-000000000002',
     category_slug: 'pants',
     category_name: 'Pants',
     name: 'Relaxed Fit Linen Drawstring Pants',
@@ -429,7 +429,7 @@ export const INITIAL_PRODUCTS: Product[] = [
   },
   {
     id: 'prod-p5',
-    category_id: 'c-pants',
+    category_id: 'c2000000-0000-0000-0000-000000000002',
     category_slug: 'pants',
     category_name: 'Pants',
     name: 'Architectural Wide-Leg Pleated Trousers',
@@ -467,8 +467,8 @@ export const INITIAL_PRODUCTS: Product[] = [
 export const INITIAL_REVIEWS: Review[] = [
   {
     id: 'rev-1',
-    product_id: 'prod-s1',
-    user_id: 'u-1',
+    product_id: 'p1000000-0000-0000-0000-000000000001',
+    user_id: 'e1000000-0000-0000-0000-000000000001',
     customer_name: 'Usman Farooq',
     rating: 5,
     review_text: 'The weight of this overshirt is unbelievable. The Japanese cotton twill feels substantial, and the snap buttons give it an elevated minimalist touch. Fast COD delivery to Lahore in 2 days!',
@@ -477,8 +477,8 @@ export const INITIAL_REVIEWS: Review[] = [
   },
   {
     id: 'rev-2',
-    product_id: 'prod-p1',
-    user_id: 'u-2',
+    product_id: 'p2000000-0000-0000-0000-000000000001',
+    user_id: 'e2000000-0000-0000-0000-000000000002',
     customer_name: 'Hamza Tariq',
     rating: 5,
     review_text: 'Finally a cargo pant that looks sleek rather than baggy! The magnetic pockets are silent and low profile. Fits true to size, definitely ordering the black one next.',
@@ -487,8 +487,8 @@ export const INITIAL_REVIEWS: Review[] = [
   },
   {
     id: 'rev-3',
-    product_id: 'prod-s2',
-    user_id: 'u-3',
+    product_id: 'p1000000-0000-0000-0000-000000000002',
+    user_id: 'e3000000-0000-0000-0000-000000000003',
     customer_name: 'Ali Raza',
     rating: 5,
     review_text: 'Exceptional stitching on the collar and cuffs. High quality Egyptian cotton that holds its structure all day. The Vortex Wear is setting a new benchmark for menswear in Pakistan.',

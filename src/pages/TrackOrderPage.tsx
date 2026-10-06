@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { Order, OrderStatus } from '../lib/types';
+import { fetchOrderByNumberFromSupabase } from '../lib/supabase';
 
 interface TrackOrderPageProps {
   onNavigate: (path: string) => void;
@@ -41,7 +42,7 @@ export const TrackOrderPage: React.FC<TrackOrderPageProps> = ({
     }
   }, [initialOrderQuery]);
 
-  const performSearch = (query: string) => {
+  const performSearch = async (query: string) => {
     const cleaned = query.trim().toUpperCase();
     if (!cleaned) return;
 
@@ -51,7 +52,7 @@ export const TrackOrderPage: React.FC<TrackOrderPageProps> = ({
     // 1. Look up in local orders
     let found = getOrderByNumber(cleaned) || getOrderById(cleaned.toLowerCase());
 
-    // 2. Fuzzy match by partial order_number or phone or email
+    // 2. Fuzzy match by partial order_number or id
     if (!found) {
       found = orders.find(
         (o) =>
@@ -59,6 +60,18 @@ export const TrackOrderPage: React.FC<TrackOrderPageProps> = ({
           o.order_number.toUpperCase().includes(cleaned) ||
           o.id.toLowerCase() === query.trim().toLowerCase()
       );
+    }
+
+    // 3. Query Supabase directly by order number for live tracking
+    if (!found) {
+      try {
+        const remoteOrder = await fetchOrderByNumberFromSupabase(cleaned);
+        if (remoteOrder) {
+          found = remoteOrder;
+        }
+      } catch (err) {
+        console.warn('Error fetching order by number:', err);
+      }
     }
 
     setTrackedOrder(found || null);

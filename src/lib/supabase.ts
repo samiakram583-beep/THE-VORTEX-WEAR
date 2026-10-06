@@ -15,6 +15,12 @@ import {
   Address,
   AdminAuditLog,
 } from './types';
+import {
+  INITIAL_CATEGORIES,
+  INITIAL_PRODUCTS,
+  INITIAL_BANNERS,
+  INITIAL_COUPONS,
+} from './initialData';
 
 // ==============================================================================
 // 1. SUPABASE CLIENT CONFIGURATION
@@ -65,6 +71,9 @@ export async function setRuntimeSupabaseKey(key: string): Promise<boolean> {
     // ignore
   }
   reinitSupabaseClient();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('vortex_supabase_config_updated'));
+  }
   return true;
 }
 
@@ -84,6 +93,7 @@ export async function syncSupabaseConfigFromServer(): Promise<boolean> {
           // ignore
         }
         reinitSupabaseClient();
+        window.dispatchEvent(new CustomEvent('vortex_supabase_config_updated'));
       }
       return true;
     }
@@ -267,8 +277,12 @@ export async function fetchCategoriesFromSupabase(): Promise<Category[] | null> 
   }
 }
 
-export async function createCategoryInSupabase(category: Omit<Category, 'id'>): Promise<Category | null> {
-  if (!isSupabaseConfigured) return null;
+export async function createCategoryInSupabase(
+  category: Omit<Category, 'id'>
+): Promise<{ success: boolean; category?: Category; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: false, error: 'Supabase client is not configured.' };
+  }
   try {
     const { data, error } = await supabase
       .from('categories')
@@ -285,20 +299,23 @@ export async function createCategoryInSupabase(category: Omit<Category, 'id'>): 
 
     if (error || !data) {
       console.warn('Error inserting category in Supabase:', error);
-      return null;
+      return { success: false, error: error?.message || 'Database error creating category.' };
     }
     return {
-      id: data.id,
-      name: data.name,
-      slug: data.slug,
-      description: data.description || '',
-      image_url: data.image_url || '',
-      is_active: data.is_active,
-      sort_order: data.sort_order,
+      success: true,
+      category: {
+        id: data.id,
+        name: data.name,
+        slug: data.slug,
+        description: data.description || '',
+        image_url: data.image_url || '',
+        is_active: data.is_active,
+        sort_order: data.sort_order,
+      },
     };
-  } catch (err) {
+  } catch (err: any) {
     console.warn('Exception creating category in Supabase:', err);
-    return null;
+    return { success: false, error: err?.message || 'Exception creating category.' };
   }
 }
 
@@ -324,6 +341,17 @@ export async function updateCategoryInSupabase(id: string, updates: Partial<Cate
 export async function deleteCategoryInSupabase(id: string): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   try {
+    const { data: cat } = await supabase.from('categories').select('image_url').eq('id', id).maybeSingle();
+    if (cat?.image_url) {
+      const path = extractStoragePathFromUrl(cat.image_url, 'product-images');
+      if (path) {
+        try {
+          await supabase.storage.from('product-images').remove([path]);
+        } catch {
+          // ignore
+        }
+      }
+    }
     const { error } = await supabase.from('categories').delete().eq('id', id);
     return !error;
   } catch (err) {
@@ -430,10 +458,38 @@ export async function fetchProductsFromSupabase(options?: {
   }
 }
 
+/**
+ * Safely extracts relative bucket storage path from Supabase storage URLs
+ * e.g. https://.../storage/v1/object/public/product-images/garments/123.jpg -> garments/123.jpg
+ */
+export function extractStoragePathFromUrl(url: string | null | undefined, bucket = 'product-images'): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const publicMarker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(publicMarker);
+  if (idx !== -1) {
+    return decodeURIComponent(url.substring(idx + publicMarker.length).split('?')[0]);
+  }
+  const signMarker = `/storage/v1/object/sign/${bucket}/`;
+  const sIdx = url.indexOf(signMarker);
+  if (sIdx !== -1) {
+    return decodeURIComponent(url.substring(sIdx + signMarker.length).split('?')[0]);
+  }
+  if (url.startsWith('garments/') || url.startsWith('banners/')) {
+    return url;
+  }
+  return null;
+}
+
 export async function createProductInSupabase(
   product: Omit<Product, 'id' | 'created_at' | 'updated_at'>
-): Promise<Product | null> {
-  if (!isSupabaseConfigured) return null;
+): Promise<{ success: boolean; product?: Product; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: false, error: 'Supabase client is not configured.' };
+  }
+
+  if (!product.category_id || !product.category_id.trim()) {
+    return { success: false, error: 'A valid category is required to create a product.' };
+  }
 
   try {
     // 1. Insert product header
@@ -457,7 +513,7 @@ export async function createProductInSupabase(
 
     if (prodErr || !prodData) {
       console.warn('Supabase product insert error:', prodErr);
-      return null;
+      return { success: false, error: prodErr?.message || 'Database error inserting product record.' };
     }
 
     const productId = prodData.id;
@@ -468,10 +524,15 @@ export async function createProductInSupabase(
       const imageRows = product.images.map((img, idx) => ({
         product_id: productId,
         image_url: img.image_url,
-        sort_order: idx,
+        storage_path: img.storage_path || extractStoragePathFromUrl(img.image_url, 'product-images') || null,
+        sort_order: idx + 1,
         is_primary: img.is_primary || idx === 0,
+        alt_text: img.alt_text || product.name,
       }));
-      const { data: imgData } = await supabase.from('product_images').insert(imageRows).select();
+      const { data: imgData, error: imgErr } = await supabase.from('product_images').insert(imageRows).select();
+      if (imgErr) {
+        console.warn('Supabase product_images insert warning:', imgErr);
+      }
       if (imgData) {
         insertedImages = imgData.map((img: any) => ({
           id: img.id,
@@ -499,7 +560,11 @@ export async function createProductInSupabase(
         stock_quantity: v.stock_quantity ?? 0,
         is_active: v.is_active ?? true,
       }));
-      const { data: varData } = await supabase.from('product_variants').insert(variantRows).select();
+      const { data: varData, error: varErr } = await supabase.from('product_variants').insert(variantRows).select();
+      if (varErr) {
+        console.error('Supabase product_variants insert error:', varErr);
+        return { success: false, error: `Product created, but variants failed: ${varErr.message}` };
+      }
       if (varData) {
         insertedVariants = varData.map((v: any) => ({
           id: v.id,
@@ -516,7 +581,7 @@ export async function createProductInSupabase(
       }
     }
 
-    return {
+    const createdProduct: Product = {
       ...product,
       id: productId,
       images: insertedImages.length > 0 ? insertedImages : product.images,
@@ -524,17 +589,19 @@ export async function createProductInSupabase(
       created_at: prodData.created_at,
       updated_at: prodData.updated_at,
     };
-  } catch (err) {
+
+    return { success: true, product: createdProduct };
+  } catch (err: any) {
     console.warn('Error creating product in Supabase:', err);
-    return null;
+    return { success: false, error: err?.message || 'Exception creating product.' };
   }
 }
 
 export async function updateProductInSupabase(
   id: string,
   updates: Partial<Product>
-): Promise<boolean> {
-  if (!isSupabaseConfigured) return false;
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured) return { success: false, error: 'Supabase client is not configured.' };
 
   try {
     const payload: any = { updated_at: new Date().toISOString() };
@@ -553,17 +620,40 @@ export async function updateProductInSupabase(
     const { error } = await supabase.from('products').update(payload).eq('id', id);
     if (error) {
       console.warn('Supabase product update error:', error);
-      return false;
+      return { success: false, error: error.message };
     }
 
-    // If images are provided in updates, sync images table
+    // If images are provided in updates, sync images table and delete removed files from storage
     if (updates.images && Array.isArray(updates.images)) {
+      const { data: existingImgs } = await supabase
+        .from('product_images')
+        .select('image_url, storage_path')
+        .eq('product_id', id);
+
+      const newUrls = new Set(updates.images.map((img) => img.image_url));
+      const removedImgs = (existingImgs || []).filter((img) => !newUrls.has(img.image_url));
+
+      const pathsToDelete: string[] = [];
+      for (const img of removedImgs) {
+        const path = img.storage_path || extractStoragePathFromUrl(img.image_url, 'product-images');
+        if (path) pathsToDelete.push(path);
+      }
+      if (pathsToDelete.length > 0) {
+        try {
+          await supabase.storage.from('product-images').remove(pathsToDelete);
+        } catch (storageErr) {
+          console.warn('Could not remove replaced images from storage:', storageErr);
+        }
+      }
+
       await supabase.from('product_images').delete().eq('product_id', id);
       const imageRows = updates.images.map((img, idx) => ({
         product_id: id,
         image_url: img.image_url,
-        sort_order: idx,
+        storage_path: img.storage_path || extractStoragePathFromUrl(img.image_url, 'product-images') || null,
+        sort_order: idx + 1,
         is_primary: img.is_primary || idx === 0,
+        alt_text: img.alt_text || updates.name || '',
       }));
       await supabase.from('product_images').insert(imageRows);
     }
@@ -571,7 +661,7 @@ export async function updateProductInSupabase(
     // If variants are provided in updates, sync variants table
     if (updates.variants && Array.isArray(updates.variants)) {
       for (const v of updates.variants) {
-        if (v.id && !v.id.startsWith('var-') && !v.id.startsWith('temp-')) {
+        if (v.id && !v.id.startsWith('var-') && !v.id.startsWith('temp-') && !v.id.startsWith('v1') && !v.id.startsWith('v2')) {
           await supabase
             .from('product_variants')
             .update({
@@ -586,21 +676,47 @@ export async function updateProductInSupabase(
       }
     }
 
-    return true;
-  } catch (err) {
+    return { success: true };
+  } catch (err: any) {
     console.warn('Error updating product in Supabase:', err);
-    return false;
+    return { success: false, error: err?.message || 'Exception updating product.' };
   }
 }
 
-export async function deleteProductInSupabase(id: string): Promise<boolean> {
-  if (!isSupabaseConfigured) return false;
+export async function deleteProductInSupabase(id: string): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured) return { success: false, error: 'Supabase client is not configured.' };
   try {
+    // 1. Find all image URLs for this product to clean up from Supabase Storage
+    const { data: imgRows } = await supabase
+      .from('product_images')
+      .select('image_url, storage_path')
+      .eq('product_id', id);
+
+    if (imgRows && imgRows.length > 0) {
+      const storagePaths: string[] = [];
+      for (const img of imgRows) {
+        const path = img.storage_path || extractStoragePathFromUrl(img.image_url, 'product-images');
+        if (path) storagePaths.push(path);
+      }
+      if (storagePaths.length > 0) {
+        try {
+          await supabase.storage.from('product-images').remove(storagePaths);
+        } catch (storageErr) {
+          console.warn('Could not remove product images from storage:', storageErr);
+        }
+      }
+    }
+
+    // 2. Authoritatively delete product row in database
     const { error } = await supabase.from('products').delete().eq('id', id);
-    return !error;
-  } catch (err) {
+    if (error) {
+      console.warn('Error deleting product from Supabase:', error);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
     console.warn('Error deleting product in Supabase:', err);
-    return false;
+    return { success: false, error: err?.message || 'Exception deleting product.' };
   }
 }
 
@@ -626,6 +742,16 @@ export async function updateVariantStockInSupabase(
 // ==============================================================================
 
 export async function uploadImageFile(file: File, bucket = 'product-images'): Promise<string> {
+  const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
+  if (!allowedMimes.includes(file.type)) {
+    throw new Error(`Unsupported image type (${file.type || 'unknown'}). Please upload a JPEG, PNG, or WebP image.`);
+  }
+
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error('Image file is too large. Maximum allowed file size is 10 MB.');
+  }
+
   if (isSupabaseConfigured) {
     try {
       const fileExt = file.name.split('.').pop() || 'jpg';
@@ -637,28 +763,25 @@ export async function uploadImageFile(file: File, bucket = 'product-images'): Pr
         .upload(filePath, file, {
           cacheControl: '31536000',
           upsert: false,
+          contentType: file.type,
         });
 
-      if (!uploadError) {
-        const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
-        if (data?.publicUrl) {
-          return data.publicUrl;
-        }
-      } else {
-        console.warn('Supabase storage upload error:', uploadError.message);
+      if (uploadError) {
+        throw new Error(`Supabase Storage upload error: ${uploadError.message}`);
       }
-    } catch (err) {
-      console.warn('Exception during Supabase storage upload:', err);
+
+      const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      if (!data?.publicUrl) {
+        throw new Error('Could not retrieve public URL for uploaded image.');
+      }
+      return data.publicUrl;
+    } catch (err: any) {
+      console.warn('Supabase storage upload error:', err?.message || err);
+      throw err;
     }
   }
 
-  // Fallback to data URL
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (error) => reject(error);
-    reader.readAsDataURL(file);
-  });
+  throw new Error('Supabase Storage is not configured. Connect your Supabase credentials in Admin Settings to upload images.');
 }
 
 // ==============================================================================
@@ -775,30 +898,25 @@ export async function createOrderInSupabase(
 }
 
 export async function fetchCustomerOrdersFromSupabase(
-  userId?: string,
-  userEmail?: string
+  userId?: string
 ): Promise<Order[] | null> {
   if (!isSupabaseConfigured) return null;
+  if (!userId || !userId.trim()) return [];
 
   try {
-    let query = supabase
+    const { data, error } = await supabase
       .from('orders')
       .select(`
         *,
         items:order_items (*)
       `)
+      .eq('user_id', userId.trim())
       .order('created_at', { ascending: false });
 
-    if (userId) {
-      query = query.eq('user_id', userId);
-    } else if (userEmail) {
-      query = query.eq('customer_email', userEmail);
-    } else {
+    if (error || !data) {
+      if (error) console.warn('[SUPABASE ORDERS FETCH]', error.message);
       return [];
     }
-
-    const { data, error } = await query;
-    if (error || !data) return null;
 
     return data.map((o: any) => ({
       id: o.id,
@@ -894,6 +1012,63 @@ export async function fetchAllOrdersForAdminFromSupabase(): Promise<Order[] | nu
   }
 }
 
+export async function fetchOrderByNumberFromSupabase(
+  orderNumber: string
+): Promise<Order | null> {
+  if (!isSupabaseConfigured) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        *,
+        items:order_items (*)
+      `)
+      .eq('order_number', orderNumber.trim().toUpperCase())
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      order_number: data.order_number,
+      user_id: data.user_id,
+      customer_name: data.customer_name,
+      customer_email: data.customer_email,
+      customer_phone: data.customer_phone,
+      shipping_address: data.shipping_address,
+      city: data.city,
+      province: data.province,
+      postal_code: data.postal_code,
+      payment_method: data.payment_method,
+      payment_status: data.payment_status,
+      order_status: data.order_status,
+      subtotal: Number(data.subtotal),
+      discount: Number(data.discount),
+      shipping_cost: Number(data.shipping_cost),
+      total: Number(data.total),
+      coupon_code: data.coupon_code,
+      notes: data.notes,
+      items: (data.items || []).map((it: any) => ({
+        id: it.id,
+        order_id: data.id,
+        product_id: it.product_id,
+        variant_id: it.variant_id,
+        product_name: it.product_name,
+        variant_description: it.variant_description,
+        quantity: it.quantity,
+        unit_price: Number(it.unit_price),
+        total_price: Number(it.total_price),
+      })),
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+    };
+  } catch (err) {
+    console.warn('Error fetching order by number from Supabase:', err);
+    return null;
+  }
+}
+
 export async function updateOrderStatusInSupabase(
   orderId: string,
   status: OrderStatus
@@ -923,15 +1098,8 @@ export async function registerCustomerWithSupabase(
 ): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
   if (!isSupabaseConfigured) {
     return {
-      success: true,
-      user: {
-        id: `u-${Date.now()}`,
-        full_name: name,
-        email,
-        phone,
-        role: 'customer',
-        created_at: new Date().toISOString(),
-      },
+      success: false,
+      error: 'Supabase authentication service is not configured. Please configure API credentials.',
     };
   }
 
@@ -986,14 +1154,8 @@ export async function loginCustomerWithSupabase(
 ): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
   if (!isSupabaseConfigured) {
     return {
-      success: true,
-      user: {
-        id: `u-${Date.now()}`,
-        full_name: email.split('@')[0],
-        email,
-        role: 'customer',
-        created_at: new Date().toISOString(),
-      },
+      success: false,
+      error: 'Supabase authentication service is not configured. Please configure API credentials.',
     };
   }
 
@@ -1238,6 +1400,17 @@ export async function createBannerInSupabase(banner: Omit<Banner, 'id'>): Promis
 export async function deleteBannerInSupabase(id: string): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   try {
+    const { data: banner } = await supabase.from('banners').select('image_url').eq('id', id).maybeSingle();
+    if (banner?.image_url) {
+      const path = extractStoragePathFromUrl(banner.image_url, 'product-images');
+      if (path) {
+        try {
+          await supabase.storage.from('product-images').remove([path]);
+        } catch {
+          // ignore
+        }
+      }
+    }
     const { error } = await supabase.from('banners').delete().eq('id', id);
     return !error;
   } catch {
@@ -1443,5 +1616,163 @@ export async function logAdminActionInSupabase(
     return !error;
   } catch {
     return false;
+  }
+}
+
+// ==============================================================================
+// 10. SAFE ONE-TIME DATABASE INITIALIZATION (SEED DATA RULE COMPLIANT)
+// ==============================================================================
+export async function initializeSupabaseStoreIfEmpty(): Promise<{
+  success: boolean;
+  message: string;
+  alreadyInitialized?: boolean;
+}> {
+  if (!isSupabaseConfigured) {
+    return { success: false, message: 'Supabase client is not configured.' };
+  }
+
+  try {
+    // 1. Strict guard: Check if store has already been initialized (site_settings flag)
+    const { data: initFlag } = await supabase
+      .from('site_settings')
+      .select('value')
+      .eq('key', 'store_initialized')
+      .maybeSingle();
+
+    if (initFlag?.value?.initialized) {
+      return {
+        success: true,
+        alreadyInitialized: true,
+        message: 'Store was previously initialized. Seeding blocked to protect intentional production deletions.',
+      };
+    }
+
+    // 2. Strict guard: Check if any products or categories already exist in database
+    const [prodCheck, catCheck] = await Promise.all([
+      supabase.from('products').select('id').limit(1),
+      supabase.from('categories').select('id').limit(1),
+    ]);
+
+    if ((prodCheck.data && prodCheck.data.length > 0) || (catCheck.data && catCheck.data.length > 0)) {
+      // Mark as initialized so no deployment will ever attempt to re-seed
+      await supabase.from('site_settings').upsert({
+        key: 'store_initialized',
+        value: { initialized: true, marked_at: new Date().toISOString() },
+      });
+      return {
+        success: true,
+        alreadyInitialized: true,
+        message: 'Existing production database detected. Marked store as initialized.',
+      };
+    }
+
+    // 3. Database is truly empty and has NEVER been initialized:
+    // Populate baseline categories & products
+    for (const cat of INITIAL_CATEGORIES) {
+      await supabase.from('categories').upsert(
+        {
+          name: cat.name,
+          slug: cat.slug,
+          description: cat.description,
+          image_url: cat.image_url,
+          is_active: cat.is_active,
+          sort_order: cat.sort_order,
+        },
+        { onConflict: 'slug' }
+      );
+    }
+
+    const { data: dbCategories } = await supabase.from('categories').select('*');
+    const shirtsCat = dbCategories?.find((c) => c.slug === 'shirts');
+    const pantsCat = dbCategories?.find((c) => c.slug === 'pants');
+
+    for (const prod of INITIAL_PRODUCTS) {
+      const categoryId = prod.category_slug === 'pants' ? pantsCat?.id : shirtsCat?.id;
+      if (!categoryId) continue;
+
+      const { data: insertedProd } = await supabase
+        .from('products')
+        .insert({
+          category_id: categoryId,
+          name: prod.name,
+          slug: prod.slug,
+          description: prod.description,
+          base_price: prod.base_price,
+          sale_price: prod.sale_price || null,
+          sku: prod.sku,
+          is_active: prod.is_active,
+          is_featured: prod.is_featured,
+          is_new_arrival: prod.is_new_arrival,
+          is_on_sale: prod.is_on_sale,
+        })
+        .select()
+        .single();
+
+      if (insertedProd?.id) {
+        if (prod.images && prod.images.length > 0) {
+          const imgRows = prod.images.map((img, idx) => ({
+            product_id: insertedProd.id,
+            image_url: img.image_url,
+            storage_path: img.storage_path || extractStoragePathFromUrl(img.image_url, 'product-images') || null,
+            sort_order: idx + 1,
+            is_primary: idx === 0,
+          }));
+          await supabase.from('product_images').insert(imgRows);
+        }
+
+        if (prod.variants && prod.variants.length > 0) {
+          const varRows = prod.variants.map((v) => ({
+            product_id: insertedProd.id,
+            size: v.size,
+            color: v.color,
+            color_code: v.color_code || null,
+            sku: v.sku,
+            price: v.price,
+            sale_price: v.sale_price || null,
+            stock_quantity: v.stock_quantity,
+            is_active: v.is_active,
+          }));
+          await supabase.from('product_variants').insert(varRows);
+        }
+      }
+    }
+
+    for (const b of INITIAL_BANNERS) {
+      await supabase.from('banners').insert({
+        title: b.title,
+        description: b.description,
+        image_url: b.image_url,
+        button_text: b.button_text,
+        button_url: b.button_url,
+        is_active: b.is_active,
+        sort_order: b.sort_order,
+      });
+    }
+
+    for (const coup of INITIAL_COUPONS) {
+      await supabase.from('coupons').upsert(
+        {
+          code: coup.code,
+          discount_type: coup.discount_type,
+          discount_value: coup.discount_value,
+          minimum_order_amount: coup.minimum_order_amount,
+          maximum_discount: coup.maximum_discount || null,
+          usage_limit: coup.usage_limit || null,
+          is_active: coup.is_active,
+        },
+        { onConflict: 'code' }
+      );
+    }
+
+    // Record initialization marker permanently in Supabase
+    await supabase.from('site_settings').upsert({
+      key: 'store_initialized',
+      value: { initialized: true, initialized_at: new Date().toISOString() },
+    });
+
+    return { success: true, message: 'Store database successfully initialized with production catalog.' };
+  } catch (err: any) {
+    console.warn('Error initializing store data:', err);
+    return { success: false, message: err?.message || 'Initialization failed' };
   }
 }

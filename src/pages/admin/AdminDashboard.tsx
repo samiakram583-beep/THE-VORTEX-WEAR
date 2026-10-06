@@ -30,6 +30,8 @@ import {
   BarChart3,
   ShieldAlert,
   Check,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { Product, ProductVariant, OrderStatus, Category, Coupon, AdminAuditLog } from '../../lib/types';
@@ -208,12 +210,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onExitAdmin();
   };
 
+  // Category Add / Edit Modal State
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [catFormName, setCatFormName] = useState('');
+  const [catFormSlug, setCatFormSlug] = useState('');
+  const [catFormDescription, setCatFormDescription] = useState('');
+  const [catFormImageUrl, setCatFormImageUrl] = useState('');
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [categoryFormError, setCategoryFormError] = useState<string | null>(null);
+
   // Product Add / Edit Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [prodFormName, setProdFormName] = useState('');
   const [prodFormSlug, setProdFormSlug] = useState('');
-  const [prodFormCategory, setProdFormCategory] = useState(categories[0]?.id || 'c-shirts');
+  const [prodFormCategory, setProdFormCategory] = useState(categories[0]?.id || '');
   const [prodFormDescription, setProdFormDescription] = useState('');
   const [prodFormBasePrice, setProdFormBasePrice] = useState(4500);
   const [prodFormSalePrice, setProdFormSalePrice] = useState<string>('');
@@ -230,8 +242,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     { id: 'v2', product_id: '', color: 'Onyx Black', size: 'L', sku: 'VOR-NEW-L', price: 4500, stock_quantity: 15, is_active: true },
   ]);
 
-  // Image upload handler
+  // Image upload handler & product save state
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [productFormError, setProductFormError] = useState<string | null>(null);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
 
   // Search in Products
   const [productSearch, setProductSearch] = useState('');
@@ -415,11 +430,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }))
     .sort((a, b) => b.count - a.count);
 
+  const openNewCategoryModal = () => {
+    setEditingCategory(null);
+    setCatFormName('');
+    setCatFormSlug('');
+    setCatFormDescription('');
+    setCatFormImageUrl('');
+    setCategoryFormError(null);
+    setIsCategoryModalOpen(true);
+  };
+
+  const openEditCategoryModal = (cat: Category) => {
+    setEditingCategory(cat);
+    setCatFormName(cat.name);
+    setCatFormSlug(cat.slug);
+    setCatFormDescription(cat.description || '');
+    setCatFormImageUrl(cat.image_url || '');
+    setCategoryFormError(null);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCategoryFormError(null);
+    if (!catFormName.trim()) {
+      setCategoryFormError('Category name is required.');
+      return;
+    }
+
+    const finalSlug = catFormSlug.trim() || catFormName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    setIsSavingCategory(true);
+    try {
+      if (editingCategory) {
+        await updateCategory(editingCategory.id, {
+          name: catFormName.trim(),
+          slug: finalSlug,
+          description: catFormDescription.trim(),
+          image_url: catFormImageUrl.trim(),
+        });
+      } else {
+        const created = await addCategory({
+          name: catFormName.trim(),
+          slug: finalSlug,
+          description: catFormDescription.trim(),
+          image_url: catFormImageUrl.trim(),
+          is_active: true,
+          sort_order: categories.length + 1,
+        });
+        if (!prodFormCategory) {
+          setProdFormCategory(created.id);
+        }
+      }
+      setIsCategoryModalOpen(false);
+    } catch (err: any) {
+      setCategoryFormError(err?.message || 'Failed to save category.');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (cat: Category) => {
+    try {
+      await deleteCategory(cat.id);
+    } catch (err: any) {
+      console.warn('Delete category error:', err);
+    }
+  };
+
   const openNewProductModal = () => {
     setEditingProduct(null);
     setProdFormName('');
     setProdFormSlug('');
-    setProdFormCategory(categories[0]?.id || 'c-shirts');
+    setProdFormCategory(categories[0]?.id || '');
     setProdFormDescription('');
     setProdFormBasePrice(4500);
     setProdFormSalePrice('');
@@ -433,6 +515,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       { id: 'v1', product_id: '', color: 'Onyx Black', size: 'M', sku: `SKU-${Date.now()}-M`, price: 4500, stock_quantity: 15, is_active: true },
       { id: 'v2', product_id: '', color: 'Onyx Black', size: 'L', sku: `SKU-${Date.now()}-L`, price: 4500, stock_quantity: 10, is_active: true },
     ]);
+    setProductFormError(null);
+    setImageUploadError(null);
     setIsProductModalOpen(true);
   };
 
@@ -451,11 +535,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProdFormIsSale(prod.is_on_sale);
     setProdFormImages(prod.images.map((img) => img.image_url));
     setProdVariants(prod.variants);
+    setProductFormError(null);
+    setImageUploadError(null);
     setIsProductModalOpen(true);
   };
 
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProductFormError(null);
+
+    if (!prodFormName.trim()) {
+      setProductFormError('Product name is required.');
+      return;
+    }
+
+    if (!prodFormCategory) {
+      setProductFormError('Please select a valid Category. If no categories exist, click "+ New Category" to create one.');
+      return;
+    }
+
+    if (prodVariants.length === 0) {
+      setProductFormError('At least one product variant (size, color, stock) is required for inventory tracking.');
+      return;
+    }
+
+    if (prodFormSalePrice && Number(prodFormSalePrice) >= Number(prodFormBasePrice)) {
+      setProductFormError('Sale price must be lower than the regular price.');
+      return;
+    }
+
     const finalSlug = prodFormSlug.trim() || prodFormName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const finalCategory = categories.find((c) => c.id === prodFormCategory);
 
@@ -468,47 +576,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       alt_text: prodFormName,
     }));
 
-    if (editingProduct) {
-      updateProduct(editingProduct.id, {
-        name: prodFormName,
-        slug: finalSlug,
-        category_id: prodFormCategory,
-        category_slug: finalCategory?.slug,
-        category_name: finalCategory?.name,
-        description: prodFormDescription,
-        base_price: Number(prodFormBasePrice),
-        sale_price: prodFormSalePrice ? Number(prodFormSalePrice) : undefined,
-        sku: prodFormSku,
-        is_active: prodFormIsActive,
-        is_featured: prodFormIsFeatured,
-        is_new_arrival: prodFormIsNew,
-        is_on_sale: prodFormIsSale,
-        images: imageObjects,
-        variants: prodVariants,
-      });
-    } else {
-      addProduct({
-        category_id: prodFormCategory,
-        category_slug: finalCategory?.slug,
-        category_name: finalCategory?.name,
-        name: prodFormName,
-        slug: finalSlug,
-        description: prodFormDescription,
-        base_price: Number(prodFormBasePrice),
-        sale_price: prodFormSalePrice ? Number(prodFormSalePrice) : undefined,
-        sku: prodFormSku,
-        is_active: prodFormIsActive,
-        is_featured: prodFormIsFeatured,
-        is_new_arrival: prodFormIsNew,
-        is_on_sale: prodFormIsSale,
-        images: imageObjects,
-        variants: prodVariants,
-      });
+    setIsSavingProduct(true);
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id, {
+          name: prodFormName,
+          slug: finalSlug,
+          category_id: prodFormCategory,
+          category_slug: finalCategory?.slug,
+          category_name: finalCategory?.name,
+          description: prodFormDescription,
+          base_price: Number(prodFormBasePrice),
+          sale_price: prodFormSalePrice ? Number(prodFormSalePrice) : undefined,
+          sku: prodFormSku,
+          is_active: prodFormIsActive,
+          is_featured: prodFormIsFeatured,
+          is_new_arrival: prodFormIsNew,
+          is_on_sale: prodFormIsSale,
+          images: imageObjects,
+          variants: prodVariants,
+        });
+      } else {
+        await addProduct({
+          category_id: prodFormCategory,
+          category_slug: finalCategory?.slug,
+          category_name: finalCategory?.name,
+          name: prodFormName,
+          slug: finalSlug,
+          description: prodFormDescription,
+          base_price: Number(prodFormBasePrice),
+          sale_price: prodFormSalePrice ? Number(prodFormSalePrice) : undefined,
+          sku: prodFormSku,
+          is_active: prodFormIsActive,
+          is_featured: prodFormIsFeatured,
+          is_new_arrival: prodFormIsNew,
+          is_on_sale: prodFormIsSale,
+          images: imageObjects,
+          variants: prodVariants,
+        });
+      }
+      setIsProductModalOpen(false);
+    } catch (err: any) {
+      console.warn('Error saving product in database:', err);
+      const raw = err?.message || '';
+      let msg = 'Failed to publish garment to database.';
+      if (raw.toLowerCase().includes('row-level security') || raw.toLowerCase().includes('violates')) {
+        msg = 'Database Authorization Denied: Administrator clearance required to create or modify products in Supabase.';
+      } else if (raw.toLowerCase().includes('foreign key') || raw.toLowerCase().includes('category')) {
+        msg = 'Category Constraint: Selected category ID is invalid or missing in database.';
+      } else if (raw.toLowerCase().includes('unique') || raw.toLowerCase().includes('duplicate') || raw.toLowerCase().includes('sku')) {
+        msg = `A garment with this SKU (${prodFormSku}) or slug already exists in the catalog.`;
+      } else if (raw) {
+        msg = raw;
+      }
+      setProductFormError(msg);
+    } finally {
+      setIsSavingProduct(false);
     }
-    setIsProductModalOpen(false);
   };
 
   const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImageUploadError(null);
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -517,8 +645,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const file = files[0];
       const uploadedUrl = await uploadImageFile(file);
       setProdFormImages((prev) => [uploadedUrl, ...prev]);
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Image upload error:', err);
+      setImageUploadError(err?.message || 'Failed to upload image to Supabase Storage.');
     } finally {
       setIsUploadingImage(false);
     }
@@ -999,29 +1128,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* TAB 3: CATEGORIES */}
           {activeTab === 'categories' && (
             <div className="space-y-6">
-              <div>
-                <h1 className="text-2xl font-bold font-display text-stone-950">Categories</h1>
-                <p className="text-xs text-stone-500 mt-1">Structure your apparel lines (Pants, Shirts, Outerwear).</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-bold font-display text-stone-950">Categories</h1>
+                  <p className="text-xs text-stone-500 mt-1">Structure your apparel lines (Pants, Shirts, Outerwear).</p>
+                </div>
+                <button
+                  onClick={openNewCategoryModal}
+                  className="py-2.5 px-4 bg-stone-950 hover:bg-stone-800 text-white text-xs font-bold rounded-lg flex items-center gap-2 shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add New Category</span>
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {categories.map((cat) => (
-                  <div key={cat.id} className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
-                    <div className="aspect-[16/9] rounded-lg overflow-hidden bg-stone-100">
-                      <img src={cat.image_url} alt="" className="w-full h-full object-cover" />
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-base font-bold text-stone-950 font-display">{cat.name}</h3>
-                        <span className="text-[10px] font-bold bg-stone-100 px-2 py-0.5 rounded-sm uppercase">
-                          slug: {cat.slug}
-                        </span>
+              {categories.length === 0 ? (
+                <div className="p-12 text-center bg-white rounded-xl border border-stone-200 space-y-3">
+                  <p className="text-xs text-stone-500">No categories found in the database.</p>
+                  <button
+                    onClick={openNewCategoryModal}
+                    className="py-2 px-4 bg-stone-900 text-white text-xs font-bold rounded-lg"
+                  >
+                    + Create First Category
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {categories.map((cat) => (
+                    <div key={cat.id} className="p-6 bg-white rounded-xl border border-stone-200 shadow-xs space-y-4">
+                      {cat.image_url ? (
+                        <div className="aspect-[16/9] rounded-lg overflow-hidden bg-stone-100">
+                          <img src={cat.image_url} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      ) : null}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-base font-bold text-stone-950 font-display">{cat.name}</h3>
+                          <span className="text-[10px] font-bold bg-stone-100 px-2 py-0.5 rounded-sm uppercase">
+                            slug: {cat.slug}
+                          </span>
+                        </div>
+                        <p className="text-xs text-stone-600 mt-1 leading-relaxed">{cat.description}</p>
                       </div>
-                      <p className="text-xs text-stone-600 mt-1 leading-relaxed">{cat.description}</p>
+
+                      <div className="pt-3 border-t border-stone-100 flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => openEditCategoryModal(cat)}
+                          className="py-1 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-semibold rounded-md"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCategory(cat)}
+                          className="py-1 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-semibold rounded-md"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -2290,9 +2457,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {isProductModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6">
           <div className="bg-white rounded-xl shadow-2xl border border-stone-200 max-w-3xl w-full p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-bold font-display text-stone-950 mb-4 pb-3 border-b border-stone-200">
-              {editingProduct ? 'Edit Garment' : 'Add New Product to The Vortex Wear'}
-            </h2>
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-stone-200">
+              <h2 className="text-xl font-bold font-display text-stone-950">
+                {editingProduct ? 'Edit Garment' : 'Add New Product to The Vortex Wear'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsProductModalOpen(false)}
+                className="p-1.5 text-stone-400 hover:text-stone-900 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {productFormError && (
+              <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                <div className="flex-1 leading-relaxed">
+                  <strong className="block font-bold">Publishing Error:</strong>
+                  <span>{productFormError}</span>
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleSaveProduct} className="space-y-6 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2314,18 +2500,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-stone-800 mb-1">Category *</label>
-                  <select
-                    value={prodFormCategory}
-                    onChange={(e) => setProdFormCategory(e.target.value)}
-                    className="w-full py-2 px-3 border border-stone-300 rounded-md bg-white focus:outline-hidden"
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-stone-800">Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => openNewCategoryModal()}
+                      className="text-[11px] text-amber-700 hover:text-amber-900 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>+ New Category</span>
+                    </button>
+                  </div>
+
+                  {categories.length === 0 ? (
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-800 space-y-1.5">
+                      <p>No categories found in database. Create one to assign this product.</p>
+                      <button
+                        type="button"
+                        onClick={() => openNewCategoryModal()}
+                        className="py-1 px-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[11px] transition-colors cursor-pointer"
+                      >
+                        + Create Category Now
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={prodFormCategory}
+                      onChange={(e) => setProdFormCategory(e.target.value)}
+                      className="w-full py-2 px-3 border border-stone-300 rounded-md bg-white focus:outline-hidden"
+                    >
+                      <option value="">Select a Category...</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div>
@@ -2551,9 +2762,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="py-2.5 px-6 bg-[#121212] hover:bg-stone-800 text-white font-bold rounded-lg shadow-md"
+                  disabled={isSavingProduct}
+                  className="py-2.5 px-6 bg-[#121212] hover:bg-stone-800 disabled:opacity-50 text-white font-bold rounded-lg shadow-md cursor-pointer transition-colors"
                 >
-                  Save Garment
+                  {isSavingProduct
+                    ? 'Publishing Garment...'
+                    : editingProduct
+                    ? 'Update Garment'
+                    : 'Publish Garment'}
                 </button>
               </div>
             </form>

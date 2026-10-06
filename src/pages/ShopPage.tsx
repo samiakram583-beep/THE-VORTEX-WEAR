@@ -21,7 +21,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   onSelectProduct,
   onQuickView,
 }) => {
-  const { products, settings } = useStore();
+  const { products, settings, categories } = useStore();
 
   const [categoryFilter, setCategoryFilter] = useState<string>(initialCategory || 'all');
   const [selectedSize, setSelectedSize] = useState<string>('all');
@@ -150,28 +150,25 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         <div className="hidden lg:flex items-center gap-1.5 p-1 bg-stone-100 rounded-lg">
           <button
             onClick={() => setCategoryFilter('all')}
-            className={`px-3 py-1.5 font-semibold rounded-md transition-colors ${
+            className={`px-3 py-1.5 font-semibold rounded-md transition-colors cursor-pointer ${
               categoryFilter === 'all' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-600 hover:text-stone-950'
             }`}
           >
             All Pieces
           </button>
-          <button
-            onClick={() => setCategoryFilter('shirts')}
-            className={`px-3 py-1.5 font-semibold rounded-md transition-colors ${
-              categoryFilter === 'shirts' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-600 hover:text-stone-950'
-            }`}
-          >
-            Shirts
-          </button>
-          <button
-            onClick={() => setCategoryFilter('pants')}
-            className={`px-3 py-1.5 font-semibold rounded-md transition-colors ${
-              categoryFilter === 'pants' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-600 hover:text-stone-950'
-            }`}
-          >
-            Pants
-          </button>
+          {categories.filter((c) => c.is_active).map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setCategoryFilter(cat.slug)}
+              className={`px-3 py-1.5 font-semibold rounded-md transition-colors cursor-pointer ${
+                categoryFilter === cat.slug || categoryFilter === cat.id
+                  ? 'bg-white text-stone-950 shadow-xs'
+                  : 'text-stone-600 hover:text-stone-950'
+              }`}
+            >
+              {cat.name}
+            </button>
+          ))}
         </div>
 
         {/* Sort Select */}
@@ -345,16 +342,26 @@ export const ShopPage: React.FC<ShopPageProps> = ({
               {/* Category */}
               <div>
                 <label className="block text-xs font-semibold text-stone-800 mb-2">Category</label>
-                <div className="grid grid-cols-3 gap-1.5 text-xs">
-                  {['all', 'shirts', 'pants'].map((cat) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs">
+                  <button
+                    onClick={() => setCategoryFilter('all')}
+                    className={`py-1.5 px-2 font-semibold capitalize rounded-md border cursor-pointer ${
+                      categoryFilter === 'all' ? 'bg-stone-950 text-white border-stone-950' : 'border-stone-200 text-stone-700'
+                    }`}
+                  >
+                    All Pieces
+                  </button>
+                  {categories.filter((c) => c.is_active).map((cat) => (
                     <button
-                      key={cat}
-                      onClick={() => setCategoryFilter(cat)}
-                      className={`py-1.5 px-2 font-semibold capitalize rounded-md border ${
-                        categoryFilter === cat ? 'bg-stone-950 text-white border-stone-950' : 'border-stone-200'
+                      key={cat.id}
+                      onClick={() => setCategoryFilter(cat.slug)}
+                      className={`py-1.5 px-2 font-semibold capitalize rounded-md border cursor-pointer ${
+                        categoryFilter === cat.slug || categoryFilter === cat.id
+                          ? 'bg-stone-950 text-white border-stone-950'
+                          : 'border-stone-200 text-stone-700'
                       }`}
                     >
-                      {cat}
+                      {cat.name}
                     </button>
                   ))}
                 </div>

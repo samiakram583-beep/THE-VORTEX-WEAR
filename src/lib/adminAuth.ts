@@ -1,4 +1,5 @@
 import { AdminSession, AdminAuditLog } from './types';
+import { supabase } from './supabase';
 
 const ADMIN_SESSION_STORAGE_KEY = 'vortex_admin_session_v2';
 
@@ -33,6 +34,11 @@ export class AdminAuthService {
    */
   static clearSession(): void {
     sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    try {
+      supabase.auth.signOut().catch(() => {});
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -124,6 +130,19 @@ export class AdminAuthService {
           expiresAt: data.expiresAt || Date.now() + 30 * 60 * 1000,
         };
         this.setSession(session);
+
+        // If server provided Supabase Auth tokens, initialize browser Supabase client session
+        if (data.supabaseSession?.access_token) {
+          try {
+            await supabase.auth.setSession({
+              access_token: data.supabaseSession.access_token,
+              refresh_token: data.supabaseSession.refresh_token,
+            });
+          } catch (spErr) {
+            console.warn('[ADMIN SUPABASE SESSION SET WARNING]', spErr);
+          }
+        }
+
         return {
           success: true,
           session,

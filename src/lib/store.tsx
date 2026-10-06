@@ -26,6 +26,7 @@ import { AdminAuthService } from './adminAuth';
 import {
   supabase,
   isSupabaseConfigured,
+  syncSupabaseConfigFromServer,
   fetchCategoriesFromSupabase,
   fetchProductsFromSupabase,
   createProductInSupabase,
@@ -171,18 +172,33 @@ interface StoreContextType {
 
 const StoreContext = createContext<StoreContextType | null>(null);
 
+// Purge any legacy localStorage cache that previously acted as a rogue database or leaked customer sessions
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('vortex_products');
+    localStorage.removeItem('vortex_products_v1');
+    localStorage.removeItem('vortex_categories');
+    localStorage.removeItem('vortex_categories_v1');
+    localStorage.removeItem('vortex_banners');
+    localStorage.removeItem('vortex_banners_v1');
+    localStorage.removeItem('vortex_coupons');
+    localStorage.removeItem('vortex_coupons_v1');
+    localStorage.removeItem('vortex_reviews');
+    localStorage.removeItem('vortex_reviews_v1');
+    localStorage.removeItem('vortex_user_v1');
+    localStorage.removeItem('vortex_orders_v1');
+    localStorage.removeItem('vortex_addresses_v1');
+    localStorage.removeItem('vortex_wishlist_v1');
+  } catch {
+    // ignore
+  }
+}
+
+// Only anonymous guest cart and site display settings are kept in localStorage.
+// Sensitive customer identity, orders, wishlist, and addresses are strictly session-bound to Supabase Auth!
 const STORAGE_KEYS = {
-  PRODUCTS: 'vortex_products_v1',
-  CATEGORIES: 'vortex_categories_v1',
-  BANNERS: 'vortex_banners_v1',
-  COUPONS: 'vortex_coupons_v1',
-  REVIEWS: 'vortex_reviews_v1',
-  ORDERS: 'vortex_orders_v1',
   CART: 'vortex_cart_v1',
-  WISHLIST: 'vortex_wishlist_v1',
   SETTINGS: 'vortex_settings_v1',
-  USER: 'vortex_user_v1',
-  ADDRESSES: 'vortex_addresses_v1',
 };
 
 function getStorage<T>(key: string, defaultValue: T): T {
@@ -204,54 +220,57 @@ function setStorage<T>(key: string, value: T): void {
 }
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Supabase is the single source of truth for products, categories, banners, coupons, reviews.
+  // We do NOT use localStorage as the permanent product database.
+  // In-memory fallback is used ONLY when Supabase credentials are completely unconfigured.
   const [products, setProducts] = useState<Product[]>(() => {
-    const raw = getStorage<Product[]>(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
-    return (raw || []).map((p) => ({
-      ...p,
-      images: (p.images || []).map((img) => ({
-        ...img,
-        image_url: resolveImageUrl(img.image_url),
-      })),
-    }));
+    if (!isSupabaseConfigured) {
+      return INITIAL_PRODUCTS.map((p) => ({
+        ...p,
+        images: (p.images || []).map((img) => ({
+          ...img,
+          image_url: resolveImageUrl(img.image_url),
+        })),
+      }));
+    }
+    return [];
   });
+
   const [categories, setCategories] = useState<Category[]>(() => {
-    const raw = getStorage<Category[]>(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES);
-    return (raw || []).map((c) => ({
-      ...c,
-      image_url: resolveImageUrl(c.image_url),
-    }));
+    if (!isSupabaseConfigured) {
+      return INITIAL_CATEGORIES.map((c) => ({
+        ...c,
+        image_url: resolveImageUrl(c.image_url),
+      }));
+    }
+    return [];
   });
+
   const [banners, setBanners] = useState<Banner[]>(() => {
-    const raw = getStorage<Banner[]>(STORAGE_KEYS.BANNERS, INITIAL_BANNERS);
-    return (raw || []).map((b) => ({
-      ...b,
-      image_url: resolveImageUrl(b.image_url),
-    }));
+    if (!isSupabaseConfigured) {
+      return INITIAL_BANNERS.map((b) => ({
+        ...b,
+        image_url: resolveImageUrl(b.image_url),
+      }));
+    }
+    return [];
   });
-  const [coupons, setCoupons] = useState<Coupon[]>(() => getStorage(STORAGE_KEYS.COUPONS, INITIAL_COUPONS));
-  const [reviews, setReviews] = useState<Review[]>(() => getStorage(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS));
-  const [orders, setOrders] = useState<Order[]>(() => getStorage(STORAGE_KEYS.ORDERS, []));
+
+  const [coupons, setCoupons] = useState<Coupon[]>(() => (!isSupabaseConfigured ? INITIAL_COUPONS : []));
+  const [reviews, setReviews] = useState<Review[]>(() => (!isSupabaseConfigured ? INITIAL_REVIEWS : []));
+  const [orders, setOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartItem[]>(() => getStorage(STORAGE_KEYS.CART, []));
-  const [wishlist, setWishlist] = useState<string[]>(() => getStorage(STORAGE_KEYS.WISHLIST, []));
-  const [addresses, setAddresses] = useState<Address[]>(() => getStorage(STORAGE_KEYS.ADDRESSES, []));
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(() => getStorage(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS));
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStorage(STORAGE_KEYS.USER, null));
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Sync to local storage
-  useEffect(() => setStorage(STORAGE_KEYS.PRODUCTS, products), [products]);
-  useEffect(() => setStorage(STORAGE_KEYS.CATEGORIES, categories), [categories]);
-  useEffect(() => setStorage(STORAGE_KEYS.BANNERS, banners), [banners]);
-  useEffect(() => setStorage(STORAGE_KEYS.COUPONS, coupons), [coupons]);
-  useEffect(() => setStorage(STORAGE_KEYS.REVIEWS, reviews), [reviews]);
-  useEffect(() => setStorage(STORAGE_KEYS.ORDERS, orders), [orders]);
+  // Sync ONLY anonymous cart and settings to local storage (NEVER customer accounts, orders, or products)
   useEffect(() => setStorage(STORAGE_KEYS.CART, cart), [cart]);
-  useEffect(() => setStorage(STORAGE_KEYS.WISHLIST, wishlist), [wishlist]);
-  useEffect(() => setStorage(STORAGE_KEYS.ADDRESSES, addresses), [addresses]);
   useEffect(() => setStorage(STORAGE_KEYS.SETTINGS, settings), [settings]);
-  useEffect(() => setStorage(STORAGE_KEYS.USER, currentUser), [currentUser]);
 
   // Toast manager
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -266,12 +285,43 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // 1. Load data from Supabase if configured
+  // 1. Authoritative Catalog Loader: reads directly from Supabase (single shared source of truth)
   const refreshCatalog = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
     setIsLoading(true);
 
     try {
+      // Synchronize client credentials with server
+      await syncSupabaseConfigFromServer();
+
+      if (!isSupabaseConfigured) {
+        // Fallback for offline / local preview mode ONLY when Supabase credentials are missing
+        setProducts(
+          INITIAL_PRODUCTS.map((p) => ({
+            ...p,
+            images: (p.images || []).map((img) => ({
+              ...img,
+              image_url: resolveImageUrl(img.image_url),
+            })),
+          }))
+        );
+        setCategories(
+          INITIAL_CATEGORIES.map((c) => ({
+            ...c,
+            image_url: resolveImageUrl(c.image_url),
+          }))
+        );
+        setBanners(
+          INITIAL_BANNERS.map((b) => ({
+            ...b,
+            image_url: resolveImageUrl(b.image_url),
+          }))
+        );
+        setCoupons(INITIAL_COUPONS);
+        setReviews(INITIAL_REVIEWS);
+        return;
+      }
+
+      // Query Supabase directly
       const [sbCategories, sbProducts, sbBanners, sbCoupons, sbReviews, sbSettings] = await Promise.all([
         fetchCategoriesFromSupabase(),
         fetchProductsFromSupabase(),
@@ -281,105 +331,135 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         fetchSiteSettingsFromSupabase(),
       ]);
 
-      if (sbCategories && sbCategories.length > 0) {
+      // If Supabase returned a valid array (including empty []), THAT is the source of truth!
+      // Deleted products or banners will not exist in sbProducts / sbBanners, so they stay deleted across all deployments!
+      if (sbCategories !== null) {
         setCategories(sbCategories);
       }
-      if (sbProducts && sbProducts.length > 0) {
+      if (sbProducts !== null) {
         setProducts(sbProducts);
       }
-      if (sbBanners && sbBanners.length > 0) {
+      if (sbBanners !== null) {
         setBanners(sbBanners);
       }
-      if (sbCoupons && sbCoupons.length > 0) {
+      if (sbCoupons !== null) {
         setCoupons(sbCoupons);
       }
-      if (sbReviews && sbReviews.length > 0) {
+      if (sbReviews !== null) {
         setReviews(sbReviews);
       }
       if (sbSettings) {
         setSettings((prev) => ({ ...prev, ...sbSettings }));
       }
     } catch (err) {
-      console.warn('Error syncing Supabase catalog:', err);
+      console.warn('[CATALOG SYNC] Error fetching authoritative catalog from Supabase:', err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Sync Supabase Auth session on mount
+  // Sync catalog on mount and listen for configuration updates
   useEffect(() => {
     refreshCatalog();
 
-    if (!isSupabaseConfigured) return;
+    const handleConfigUpdate = () => {
+      refreshCatalog();
+    };
 
-    // Check active Supabase Auth session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        const u = session.user;
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', u.id)
-          .single()
-          .then(({ data: prof }) => {
-            const profile: UserProfile = {
-              id: u.id,
-              full_name: prof?.full_name || u.user_metadata?.full_name || u.email?.split('@')[0] || 'Customer',
-              email: u.email || '',
-              phone: prof?.phone || u.user_metadata?.phone || '',
-              role: (prof?.role as any) || 'customer',
-              created_at: u.created_at,
-            };
-            setCurrentUser(profile);
-
-            // Fetch user specific data from Supabase
-            fetchWishlistFromSupabase(u.id).then((w) => {
-              if (w) setWishlist(w);
-            });
-            fetchCustomerOrdersFromSupabase(u.id, u.email).then((ords) => {
-              if (ords && ords.length > 0) setOrders(ords);
-            });
-            fetchCustomerAddressesFromSupabase(u.id).then((addrs) => {
-              if (addrs) setAddresses(addrs);
-            });
-          });
-      }
-    });
-
-    // Listen for Auth changes
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const u = session.user;
-        const { data: prof } = await supabase.from('profiles').select('*').eq('id', u.id).single();
-        const profile: UserProfile = {
-          id: u.id,
-          full_name: prof?.full_name || u.user_metadata?.full_name || u.email?.split('@')[0] || 'Customer',
-          email: u.email || '',
-          phone: prof?.phone || u.user_metadata?.phone || '',
-          role: (prof?.role as any) || 'customer',
-          created_at: u.created_at,
-        };
-        setCurrentUser(profile);
-
-        const [userWishlist, userOrders, userAddresses] = await Promise.all([
-          fetchWishlistFromSupabase(u.id),
-          fetchCustomerOrdersFromSupabase(u.id, u.email),
-          fetchCustomerAddressesFromSupabase(u.id),
-        ]);
-
-        if (userWishlist) setWishlist(userWishlist);
-        if (userOrders && userOrders.length > 0) setOrders(userOrders);
-        if (userAddresses) setAddresses(userAddresses);
-      } else if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        setAddresses([]);
-      }
-    });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('vortex_supabase_config_updated', handleConfigUpdate);
+    }
 
     return () => {
-      authListener?.subscription.unsubscribe();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('vortex_supabase_config_updated', handleConfigUpdate);
+      }
     };
   }, [refreshCatalog]);
+
+  // Sync Supabase Auth session on mount and upon runtime configuration updates
+  useEffect(() => {
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
+    const setupAuth = () => {
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+        authSubscription = null;
+      }
+
+      if (!isSupabaseConfigured) return;
+
+      const loadUserData = async (u: { id: string; email?: string; created_at?: string; user_metadata?: any }) => {
+        // Reset customer state immediately before loading newly authenticated customer
+        setWishlist([]);
+        setOrders([]);
+        setAddresses([]);
+
+        try {
+          const { data: prof } = await supabase.from('profiles').select('*').eq('id', u.id).maybeSingle();
+          const profile: UserProfile = {
+            id: u.id,
+            full_name: prof?.full_name || u.user_metadata?.full_name || u.email?.split('@')[0] || 'Customer',
+            email: u.email || '',
+            phone: prof?.phone || u.user_metadata?.phone || '',
+            role: (prof?.role as any) || 'customer',
+            created_at: u.created_at || new Date().toISOString(),
+          };
+          setCurrentUser(profile);
+
+          const [userWishlist, userOrders, userAddresses] = await Promise.all([
+            fetchWishlistFromSupabase(u.id),
+            fetchCustomerOrdersFromSupabase(u.id),
+            fetchCustomerAddressesFromSupabase(u.id),
+          ]);
+
+          setWishlist(userWishlist || []);
+          setOrders(userOrders || []);
+          setAddresses(userAddresses || []);
+        } catch (err) {
+          console.warn('[AUTH DATA LOAD ERROR]', err);
+        }
+      };
+
+      const clearUserData = () => {
+        setCurrentUser(null);
+        setOrders([]);
+        setAddresses([]);
+        setWishlist([]);
+        setAppliedCoupon(null);
+      };
+
+      // Listen for Auth state changes
+      const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          await loadUserData(session.user);
+        } else if (event === 'SIGNED_OUT' || !session) {
+          clearUserData();
+        }
+      });
+
+      authSubscription = listener.subscription;
+    };
+
+    setupAuth();
+
+    const handleConfigUpdate = () => {
+      setupAuth();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('vortex_supabase_config_updated', handleConfigUpdate);
+    }
+
+    return () => {
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('vortex_supabase_config_updated', handleConfigUpdate);
+      }
+    };
+  }, []);
 
   // Cart calculations
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
@@ -697,35 +777,55 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Admin Actions for Products
   const addProduct = async (productData: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Promise<Product> => {
-    let createdProd: Product = {
-      ...productData,
-      id: `prod-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    let createdProd: Product;
 
     if (isSupabaseConfigured) {
-      const sbProd = await createProductInSupabase(productData);
-      if (sbProd) {
-        createdProd = sbProd;
+      const res = await createProductInSupabase(productData);
+      if (!res.success || !res.product) {
+        const errorMsg = res.error || 'Failed to create product in database.';
+        showToast(errorMsg, 'error');
+        throw new Error(errorMsg);
       }
+      createdProd = res.product;
+      const fresh = await fetchProductsFromSupabase();
+      if (fresh !== null) {
+        setProducts(fresh);
+      } else {
+        setProducts((prev) => [createdProd, ...prev]);
+      }
+    } else {
+      createdProd = {
+        ...productData,
+        id: `prod-${Date.now()}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      setProducts((prev) => [createdProd, ...prev]);
     }
 
-    setProducts((prev) => [createdProd, ...prev]);
     AdminAuthService.logAction('PRODUCT_CREATED', 'PRODUCT', { name: createdProd.name, sku: createdProd.sku, price: createdProd.base_price });
-    showToast(`Product "${createdProd.name}" created successfully.`, 'success');
+    showToast(`Product "${createdProd.name}" created and published successfully.`, 'success');
     return createdProd;
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
-    setProducts((prev) =>
-      prev.map((prod) =>
-        prod.id === id ? { ...prod, ...updates, updated_at: new Date().toISOString() } : prod
-      )
-    );
-
     if (isSupabaseConfigured) {
-      await updateProductInSupabase(id, updates);
+      const res = await updateProductInSupabase(id, updates);
+      if (!res.success) {
+        const errorMsg = res.error || 'Failed to update product in database.';
+        showToast(errorMsg, 'error');
+        throw new Error(errorMsg);
+      }
+      const fresh = await fetchProductsFromSupabase();
+      if (fresh !== null) {
+        setProducts(fresh);
+      }
+    } else {
+      setProducts((prev) =>
+        prev.map((prod) =>
+          prod.id === id ? { ...prod, ...updates, updated_at: new Date().toISOString() } : prod
+        )
+      );
     }
 
     AdminAuthService.logAction('PRODUCT_UPDATED', 'PRODUCT', { productId: id, updates });
@@ -733,10 +833,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteProduct = async (id: string) => {
+    // 1. Remove from local memory immediately for rapid user feedback
     setProducts((prev) => prev.filter((p) => p.id !== id));
+
+    // 2. Authoritatively delete from Supabase and clean up Supabase Storage files
     if (isSupabaseConfigured) {
-      await deleteProductInSupabase(id);
+      const res = await deleteProductInSupabase(id);
+      if (!res.success) {
+        const fresh = await fetchProductsFromSupabase();
+        if (fresh !== null) setProducts(fresh);
+        const errorMsg = res.error || 'Failed to delete product from database.';
+        showToast(errorMsg, 'error');
+        throw new Error(errorMsg);
+      }
+      const fresh = await fetchProductsFromSupabase();
+      if (fresh !== null) {
+        setProducts(fresh);
+      }
     }
+
     AdminAuthService.logAction('PRODUCT_DELETED', 'PRODUCT', { productId: id });
     showToast('Product deleted.', 'info');
   };
@@ -757,6 +872,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (isSupabaseConfigured) {
       await updateVariantStockInSupabase(variantId, newStock);
+      const fresh = await fetchProductsFromSupabase();
+      if (fresh !== null) {
+        setProducts(fresh);
+      }
     }
 
     AdminAuthService.logAction('STOCK_CHANGED', 'INVENTORY', { productId, variantId, newStock });
@@ -765,40 +884,76 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Categories
   const addCategory = async (catData: Omit<Category, 'id'>): Promise<Category> => {
-    let newCat: Category = {
-      ...catData,
-      id: `c-${Date.now()}`,
-    };
+    let newCat: Category;
 
     if (isSupabaseConfigured) {
-      const sbCat = await createCategoryInSupabase(catData);
-      if (sbCat) {
-        newCat = sbCat;
+      const res = await createCategoryInSupabase(catData);
+      if (!res.success || !res.category) {
+        const errorMsg = res.error || 'Failed to create category in database.';
+        showToast(errorMsg, 'error');
+        throw new Error(errorMsg);
       }
+      newCat = res.category;
+      const fresh = await fetchCategoriesFromSupabase();
+      if (fresh !== null) {
+        setCategories(fresh);
+      } else {
+        setCategories((prev) => [...prev, newCat]);
+      }
+    } else {
+      newCat = {
+        ...catData,
+        id: `cat-${Date.now()}`,
+      };
+      setCategories((prev) => [...prev, newCat]);
     }
 
-    setCategories((prev) => [...prev, newCat]);
     AdminAuthService.logAction('CATEGORY_CREATED', 'CATEGORY', { name: newCat.name });
-    showToast(`Category "${newCat.name}" added.`, 'success');
+    showToast(`Category "${newCat.name}" added successfully.`, 'success');
     return newCat;
   };
 
   const updateCategory = async (id: string, updates: Partial<Category>) => {
-    setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
     if (isSupabaseConfigured) {
-      await updateCategoryInSupabase(id, updates);
+      const success = await updateCategoryInSupabase(id, updates);
+      if (!success) {
+        showToast('Failed to update category in database.', 'error');
+        throw new Error('Failed to update category in database.');
+      }
+      const fresh = await fetchCategoriesFromSupabase();
+      if (fresh !== null) {
+        setCategories(fresh);
+      }
+    } else {
+      setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
     }
     AdminAuthService.logAction('CATEGORY_UPDATED', 'CATEGORY', { categoryId: id });
     showToast('Category updated.', 'success');
   };
 
   const deleteCategory = async (id: string) => {
+    const assignedProducts = products.filter((p) => p.category_id === id);
+    if (assignedProducts.length > 0) {
+      showToast(`Cannot delete category: ${assignedProducts.length} product(s) are assigned to it. Reassign or delete products first.`, 'error');
+      throw new Error(`Cannot delete category with ${assignedProducts.length} assigned products.`);
+    }
+
     setCategories((prev) => prev.filter((c) => c.id !== id));
     if (isSupabaseConfigured) {
-      await deleteCategoryInSupabase(id);
+      const success = await deleteCategoryInSupabase(id);
+      if (!success) {
+        const fresh = await fetchCategoriesFromSupabase();
+        if (fresh !== null) setCategories(fresh);
+        showToast('Failed to delete category from database.', 'error');
+        throw new Error('Failed to delete category from database.');
+      }
+      const fresh = await fetchCategoriesFromSupabase();
+      if (fresh !== null) {
+        setCategories(fresh);
+      }
     }
     AdminAuthService.logAction('CATEGORY_DELETED', 'CATEGORY', { categoryId: id });
-    showToast('Category removed.', 'info');
+    showToast('Category deleted.', 'info');
   };
 
   // Reviews
@@ -914,6 +1069,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (created) {
         newBanner.id = created.id;
       }
+      const fresh = await fetchBannersFromSupabase();
+      if (fresh !== null) {
+        setBanners(fresh);
+      }
     }
 
     AdminAuthService.logAction('BANNER_CREATED', 'BANNER', { title: newBanner.title });
@@ -925,6 +1084,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setBanners((prev) => prev.filter((b) => b.id !== id));
     if (isSupabaseConfigured) {
       await deleteBannerInSupabase(id);
+      const fresh = await fetchBannersFromSupabase();
+      if (fresh !== null) {
+        setBanners(fresh);
+      }
     }
     AdminAuthService.logAction('BANNER_DELETED', 'BANNER', { bannerId: id });
     showToast('Hero banner deleted.', 'info');
@@ -946,6 +1109,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (other.is_active) {
           await updateBannerInSupabase(other.id, { is_active: false });
         }
+      }
+      const fresh = await fetchBannersFromSupabase();
+      if (fresh !== null) {
+        setBanners(fresh);
       }
     }
 
@@ -1014,6 +1181,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Auth - Regular Storefront Login / Register (Customer Only, Supabase Auth Integration)
   const login = async (email: string, pass: string): Promise<{ success: boolean; message?: string }> => {
+    // Clear any previous customer state immediately
+    setCurrentUser(null);
+    setOrders([]);
+    setAddresses([]);
+    setWishlist([]);
+
     const res = await loginCustomerWithSupabase(email, pass);
     if (!res.success || !res.user) {
       return { success: false, message: res.error || 'Invalid credentials' };
@@ -1021,16 +1194,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setCurrentUser(res.user);
 
-    // Fetch customer data
+    // Fetch customer data strictly scoped to this authenticated user ID
     if (isSupabaseConfigured) {
       const [userWishlist, userOrders, userAddresses] = await Promise.all([
         fetchWishlistFromSupabase(res.user.id),
-        fetchCustomerOrdersFromSupabase(res.user.id, res.user.email),
+        fetchCustomerOrdersFromSupabase(res.user.id),
         fetchCustomerAddressesFromSupabase(res.user.id),
       ]);
-      if (userWishlist) setWishlist(userWishlist);
-      if (userOrders && userOrders.length > 0) setOrders(userOrders);
-      if (userAddresses) setAddresses(userAddresses);
+      setWishlist(userWishlist || []);
+      setOrders(userOrders || []);
+      setAddresses(userAddresses || []);
     }
 
     showToast(`Signed in as ${res.user.email}`, 'success');
@@ -1043,6 +1216,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     pass: string,
     phone?: string
   ): Promise<{ success: boolean; message?: string }> => {
+    // Clear any previous customer state immediately
+    setCurrentUser(null);
+    setOrders([]);
+    setAddresses([]);
+    setWishlist([]);
+
     const res = await registerCustomerWithSupabase(name, email, pass, phone);
     if (!res.success || !res.user) {
       return { success: false, message: res.error || 'Registration failed' };
@@ -1056,7 +1235,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const logout = async () => {
     await logoutCustomerFromSupabase();
     setCurrentUser(null);
+    setOrders([]);
     setAddresses([]);
+    setWishlist([]);
+    setAppliedCoupon(null);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('vortex_user_v1');
+        localStorage.removeItem('vortex_orders_v1');
+        localStorage.removeItem('vortex_addresses_v1');
+        localStorage.removeItem('vortex_wishlist_v1');
+      } catch {
+        // ignore
+      }
+    }
     showToast('Signed out successfully.', 'info');
   };
 

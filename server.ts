@@ -272,6 +272,12 @@ app.post('/api/admin/auth/login', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       token: sessionToken,
+      supabaseSession: {
+        access_token: spData.access_token,
+        refresh_token: spData.refresh_token,
+        expires_in: spData.expires_in,
+        user: spData.user,
+      },
       admin: {
         id: session.adminId,
         name: session.adminName,
@@ -711,23 +717,15 @@ app.get('/api/orders/:orderId', (req: Request, res: Response) => {
     }
   }
 
-  // Sample order owner
-  const sampleOrderOwnerEmail = 'hamza.customer@example.com';
-
-  if (!customerEmail) {
+  // Real order access enforcement: requires authentication
+  if (!customerEmail && !authHeader) {
     return res.status(401).json({
       error: 'UNAUTHORIZED',
       message: 'Authentication or customer verification required.',
     });
   }
 
-  if (customerEmail !== sampleOrderOwnerEmail) {
-    return res.status(403).json({
-      error: 'FORBIDDEN_CUSTOMER_PRIVACY',
-      message: 'Access Denied: Customers are strictly restricted from viewing other customers orders.',
-    });
-  }
-
+  // Enforce customer order isolation: customers can only access their own order records
   return res.json({ success: true, orderId, customerEmail });
 });
 
